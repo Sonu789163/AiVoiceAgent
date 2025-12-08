@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎙️ Realtime Voice AI Agent</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 650px;
+            width: 100%;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2em;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 0.95em;
+        }
+
+        .tech-stack {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+
+        .tech-badge {
+            background: #667eea;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 0.75em;
+            font-weight: 600;
+        }
+
+        .config-box {
+            background: #f5f5f5;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .config-box label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 8px 0;
+            cursor: pointer;
+            color: #333;
+            font-size: 0.95em;
+        }
+
+        .status-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #f0f0f0 100%);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 2px solid #e0e0e0;
+        }
+
+        .status-line {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ccc;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.listening {
+            background: #4CAF50;
+        }
+
+        .status-dot.speaking {
+            background: #FF9800;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .transcript-box {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 12px 0;
+            min-height: 50px;
+            max-height: 100px;
+            overflow-y: auto;
+            font-size: 0.9em;
+            color: #555;
+            line-height: 1.5;
+        }
+
+        .transcript-box.listening {
+            border-color: #4CAF50;
+            background: #f1f8f3;
+        }
+
+        .transcript-box.speaking {
+            border-color: #FF9800;
+            background: #fff8f0;
+        }
+
+        .transcript-box.empty {
+            color: #999;
+            font-style: italic;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9em;
+            padding: 8px 0;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #f44336;
+        }
+
+        .status-indicator.connected {
+            background: #4CAF50;
+        }
+
+        .error-box {
+            background: #ffebee;
+            color: #c62828;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 0.9em;
+            border-left: 4px solid #c62828;
+            display: none;
+        }
+
+        .error-box.show {
+            display: block;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 14px;
+            font-size: 1em;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-start {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-start:hover:not(:disabled) {
+            background: #45a049;
+            transform: translateY(-2px);
+        }
+
+        .btn-start:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-end {
+            background: #f44336;
+            color: white;
+            display: none;
+        }
+
+        .btn-end:hover {
+            background: #da190b;
+            transform: translateY(-2px);
+        }
+
+        .btn-end.active {
+            display: block;
+        }
+
+        .info {
+            background: #f9f9f9;
+            border-radius: 8px;
+            padding: 15px;
+            border-left: 4px solid #667eea;
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .info h3 {
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .info ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .info li {
+            padding: 4px 0 4px 20px;
+            position: relative;
+        }
+
+        .info li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #4CAF50;
+            font-weight: bold;
+        }
+
+        .log-box {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            max-height: 120px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.75em;
+            color: #666;
+            margin-top: 15px;
+        }
+
+        .log-entry {
+            padding: 2px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎙️ Voice AI Agent</h1>
+            <p>Real-time AI Conversation</p>
+            <div class="tech-stack">
+                <span class="tech-badge">Deepgram/Web Speech</span>
+                <span class="tech-badge">OpenAI GPT-4</span>
+                <span class="tech-badge">ElevenLabs TTS</span>
+            </div>
+        </div>
+
+        <div class="error-box" id="errorBox"></div>
+
+        <div class="config-box">
+            <h4 style="margin-bottom: 10px; color: #333;">⚙️ STT Configuration</h4>
+            <label>
+                <input type="radio" name="sttMode" value="deepgram" checked>
+                <span>Deepgram (Recommended)</span>
+            </label>
+            <label>
+                <input type="radio" name="sttMode" value="webspeech">
+                <span>Web Speech API (Free)</span>
+            </label>
+        </div>
+
+        <div class="status-card">
+            <div class="status-line">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">⏸️ Ready to start</span>
+            </div>
+
+            <div class="transcript-box empty" id="transcriptBox">
+                Awaiting transcript...
+            </div>
+
+            <div class="connection-status">
+                <div class="status-indicator" id="connDot"></div>
+                <span id="connText">Disconnected</span>
+            </div>
+        </div>
+
+        <div class="buttons">
+            <button class="btn btn-start" id="startBtn" onclick="startCall()">📞 Start Call</button>
+            <button class="btn btn-end" id="endBtn" onclick="stopCall()">📴 End Call</button>
+        </div>
+
+        <div class="info">
+            <h3>📋 How to Use</h3>
+            <ul>
+                <li>Select your STT preference</li>
+                <li>Click "Start Call" to begin</li>
+                <li>Speak naturally</li>
+                <li>Wait for AI response via ElevenLabs</li>
+                <li>Click "End Call" when done</li>
+            </ul>
+        </div>
+
+        <div class="log-box" id="logBox"></div>
+    </div>
+
+    <script>
+        // ================== CONFIG ==================
+        const WS_URL = 'ws://localhost:8080/connection';
+
+        // ================== STATE ==================
+        const state = {
+            isCallActive: false,
+            isConnected: false,
+            status: 'idle',
+            sttMode: 'deepgram',
+            ws: null,
+            mediaStream: null,
+            audioProcessor: null,
+            recognition: null,
+            audioContext: null,
+            audioQueue: [],
+            isPlaying: false,
+            pcmBuffer: new Uint8Array(0),
+            isSpeaking: false,
+        };
+
+        // ================== DOM ==================
+        const dom = {
+            errorBox: document.getElementById('errorBox'),
+            statusDot: document.getElementById('statusDot'),
+            statusText: document.getElementById('statusText'),
+            transcriptBox: document.getElementById('transcriptBox'),
+            connDot: document.getElementById('connDot'),
+            connText: document.getElementById('connText'),
+            startBtn: document.getElementById('startBtn'),
+            endBtn: document.getElementById('endBtn'),
+            logBox: document.getElementById('logBox'),
+            sttRadios: document.querySelectorAll('input[name="sttMode"]'),
+        };
+
+        // ================== LOGGING ==================
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.textContent = `[${time}] ${msg}`;
+            dom.logBox.appendChild(entry);
+            dom.logBox.scrollTop = dom.logBox.scrollHeight;
+            if (dom.logBox.children.length > 20) {
+                dom.logBox.removeChild(dom.logBox.firstChild);
+            }
+        }
+
+        function showError(msg) {
+            dom.errorBox.textContent = '⚠️ ' + msg;
+            dom.errorBox.classList.add('show');
+            setTimeout(() => dom.errorBox.classList.remove('show'), 5000);
+            log('ERROR: ' + msg);
+        }
+
+        function updateStatus(newStatus) {
+            state.status = newStatus;
+            const config = {
+                idle: { dot: '', text: '⏸️ Ready to start' },
+                listening: { dot: 'listening', text: '🎧 Listening...' },
+                processing: { dot: '', text: '⚙️ Processing...' },
+                speaking: { dot: 'speaking', text: '🔊 Agent speaking...' },
+            };
+            const cfg = config[newStatus];
+            dom.statusDot.className = 'status-dot ' + cfg.dot;
+            dom.statusText.textContent = cfg.text;
+        }
+
+        function updateConnection(connected) {
+            state.isConnected = connected;
+            dom.connDot.className = 'status-indicator ' + (connected ? 'connected' : '');
+            dom.connText.textContent = connected ? '✅ Connected' : '❌ Disconnected';
+        }
+
+        function updateTranscript(text, append = false) {
+            if (append) {
+                dom.transcriptBox.textContent += ' ' + text;
+            } else {
+                dom.transcriptBox.textContent = text;
+            }
+            dom.transcriptBox.classList.remove('empty');
+            if (state.status === 'listening') {
+                dom.transcriptBox.classList.add('listening');
+            }
+        }
+
+        // ================== WEBSOCKET ==================
+        function connectWS() {
+            return new Promise((resolve, reject) => {
+                try {
+                    state.ws = new WebSocket(WS_URL);
+                    state.ws.binaryType = 'arraybuffer';
+
+                    state.ws.onopen = () => {
+                        log('✅ WebSocket connected');
+                        updateConnection(true);
+                        resolve();
+                    };
+
+                    state.ws.onmessage = (event) => {
+                        if (typeof event.data === 'string') {
+                            try {
+                                const data = JSON.parse(event.data);
+                                if (data.type === 'tts_text' && data.text) {
+                                    log('📝 TTS: ' + data.text.substring(0, 40));
+                                } else if (data.error) {
+                                    showError(data.error);
+                                }
+                            } catch (e) {}
+                        } else if (event.data instanceof ArrayBuffer) {
+                            log('🔊 Audio chunk received');
+                            handleAudioChunk(event.data);
+                        }
+                    };
+
+                    state.ws.onerror = () => {
+                        log('❌ WebSocket error');
+                        updateConnection(false);
+                        reject(new Error('WebSocket error'));
+                    };
+
+                    state.ws.onclose = () => {
+                        log('🔴 WebSocket closed');
+                        updateConnection(false);
+                    };
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        }
+
+        // ================== AUDIO HANDLING ==================
+        async function handleAudioChunk(buffer) {
+            const newData = new Uint8Array(buffer);
+            const combined = new Uint8Array(state.pcmBuffer.length + newData.length);
+            combined.set(state.pcmBuffer);
+            combined.set(newData, state.pcmBuffer.length);
+            state.pcmBuffer = combined;
+
+            const MIN = 4096;
+            while (state.pcmBuffer.length >= MIN) {
+                const sz = Math.floor(state.pcmBuffer.length / MIN) * MIN;
+                const chunk = state.pcmBuffer.slice(0, sz);
+                state.pcmBuffer = state.pcmBuffer.slice(sz);
+                state.audioQueue.push(chunk.buffer);
+            }
+
+            if (!state.isPlaying && state.audioQueue.length >= 4) {
+                playAudioQueue();
+            }
+        }
+
+        function createPCMBuffer(ctx, buf) {
+            if (!buf || buf.byteLength < 2) return null;
+
+            const len = buf.byteLength / 2;
+            const audioBuffer = ctx.createBuffer(1, len, 16000);
+            const data = audioBuffer.getChannelData(0);
+            const view = new DataView(buf);
+
+            let maxAmp = 0;
+            for (let i = 0; i < len; i++) {
+                const s = view.getInt16(i * 2, true) / 32768.0;
+                maxAmp = Math.max(maxAmp, Math.abs(s));
+            }
+
+            const scale = maxAmp > 0.85 ? 0.85 / maxAmp : 1.0;
+
+            for (let i = 0; i < len; i++) {
+                let s = (view.getInt16(i * 2, true) / 32768.0) * scale;
+                if (s > 0.99) s = 0.99 * Math.tanh(s / 0.99);
+                else if (s < -0.99) s = -0.99 * Math.tanh(s / -0.99);
+                data[i] = s;
+            }
+
+            return audioBuffer;
+        }
+
+        async function playAudioQueue() {
+            if (state.isPlaying || state.audioQueue.length === 0) return;
+
+            state.isPlaying = true;
+            updateStatus('speaking');
+            state.isSpeaking = true;
+
+            try {
+                if (!state.audioContext) {
+                    state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+
+                const ctx = state.audioContext;
+                if (ctx.state === 'suspended') await ctx.resume();
+
+                if (!ctx.gainNode) {
+                    ctx.gainNode = ctx.createGain();
+                    ctx.gainNode.gain.setValueAtTime(0.7, ctx.currentTime);
+                    ctx.gainNode.connect(ctx.destination);
+                }
+
+                let startTime = ctx.currentTime + 0.05;
+
+                while (state.audioQueue.length > 0) {
+                    const chunk = state.audioQueue.shift();
+                    const buf = createPCMBuffer(ctx, chunk);
+                    if (!buf) continue;
+
+                    const src = ctx.createBufferSource();
+                    src.buffer = buf;
+                    src.connect(ctx.gainNode);
+                    src.start(startTime);
+
+                    startTime += buf.duration - 0.002;
+                    await new Promise(r => setTimeout(r, buf.duration * 1000 - 5));
+                }
+            } catch (e) {
+                log('❌ Play error: ' + e.message);
+            } finally {
+                state.isPlaying = false;
+                state.isSpeaking = false;
+                if (state.audioQueue.length === 0) {
+                    updateStatus(state.isCallActive ? 'listening' : 'idle');
+                }
+            }
+        }
+
+        // ================== STT - DEEPGRAM ==================
+        async function startDeepgramSTT() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { sampleRate: 16000, echoCancellation: true }
+                });
+                log('✅ Mic enabled for Deepgram');
+
+                const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                const src = ctx.createMediaStreamSource(stream);
+                const proc = ctx.createScriptProcessor(4096, 1, 1);
+
+                let count = 0;
+                proc.onaudioprocess = (e) => {
+                    if (!state.isCallActive || !state.ws || state.ws.readyState !== 1) return;
+
+                    const data = e.inputBuffer.getChannelData(0);
+                    if (!data.length) return;
+
+                    const pcm = new Int16Array(data.length);
+                    for (let i = 0; i < data.length; i++) {
+                        const s = Math.max(-1, Math.min(1, data[i]));
+                        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+
+                    try {
+                        state.ws.send(pcm.buffer);
+                        count++;
+                        if (count % 50 === 0) log(`✅ Sent ${count} audio chunks`);
+                    } catch (e) {
+                        log('❌ Send error: ' + e.message);
+                    }
+                };
+
+                src.connect(proc);
+                state.mediaStream = stream;
+                state.audioProcessor = { proc, src };
+                updateStatus('listening');
+            } catch (e) {
+                showError('Microphone access denied');
+            }
+        }
+
+        // ================== STT - WEB SPEECH API ==================
+        function startWebSpeechSTT() {
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SR) {
+                showError('Web Speech API not supported');
+                return;
+            }
+
+            state.recognition = new SR();
+            state.recognition.continuous = true;
+            state.recognition.interimResults = true;
+            state.recognition.lang = 'en-US';
+
+            state.recognition.onstart = () => {
+                log('✅ Web Speech API started');
+                updateStatus('listening');
+            };
+
+            state.recognition.onresult = (event) => {
+                let interim = '';
+                let final = '';
+
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const t = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        final += t + ' ';
+                    } else {
+                        interim += t;
+                    }
+                }
+
+                if (interim) updateTranscript(interim);
+
+                if (final.trim()) {
+                    log('📝 ' + final);
+                    if (state.ws && state.ws.readyState === 1) {
+                        state.ws.send(JSON.stringify({ type: 'transcript', text: final.trim() }));
+                        updateStatus('processing');
+                    }
+                }
+            };
+
+            state.recognition.onerror = (e) => {
+                log('⚠️ ' + e.error);
+                if (e.error === 'no-speech' && state.isCallActive) {
+                    setTimeout(() => {
+                        if (state.recognition && state.isCallActive) {
+                            state.recognition.start();
+                        }
+                    }, 500);
+                }
+            };
+
+            state.recognition.onend = () => {
+                if (state.isCallActive && !state.isSpeaking) {
+                    setTimeout(() => {
+                        if (state.recognition && state.isCallActive) {
+                            state.recognition.start();
+                        }
+                    }, 300);
+                }
+            };
+
+            state.recognition.start();
+        }
+
+        // ================== MAIN FUNCTIONS ==================
+        async function startCall() {
+            try {
+                dom.startBtn.disabled = true;
+                updateStatus('processing');
+
+                // Get selected STT mode
+                state.sttMode = document.querySelector('input[name="sttMode"]:checked').value;
+                log('🎙️ Selected STT: ' + state.sttMode);
+
+                // Connect WebSocket
+                if (!state.isConnected) {
+                    log('🔗 Connecting WebSocket...');
+                    await connectWS();
+                }
+
+                // Start STT
+                state.isCallActive = true;
+                if (state.sttMode === 'deepgram') {
+                    await startDeepgramSTT();
+                } else {
+                    startWebSpeechSTT();
+                }
+
+                dom.startBtn.style.display = 'none';
+                dom.endBtn.classList.add('active');
+                log('✅ Call started');
+            } catch (e) {
+                showError(e.message || 'Failed to start call');
+                dom.startBtn.disabled = false;
+            }
+        }
+
+        function stopCall() {
+            state.isCallActive = false;
+            updateStatus('idle');
+
+            if (state.mediaStream) {
+                state.mediaStream.getTracks().forEach(t => t.stop());
+            }
+            if (state.audioProcessor) {
+                state.audioProcessor.proc.disconnect();
+                state.audioProcessor.src.disconnect();
+            }
+            if (state.recognition) {
+                state.recognition.stop();
+            }
+            if (state.ws && state.ws.readyState === 1) {
+                state.ws.send(JSON.stringify({ type: 'close' }));
+                state.ws.close();
+            }
+
+            dom.startBtn.style.display = 'block';
+            dom.startBtn.disabled = false;
+            dom.endBtn.classList.remove('active');
+            dom.transcriptBox.classList.remove('listening', 'speaking');
+            log('🛑 Call ended');
+        }
+
+        // ================== INIT ==================
+        window.addEventListener('load', () => {
+            log('🚀 App loaded');
+            dom.sttRadios.forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    state.sttMode = e.target.value;
+                    log('⚙️ STT changed to: ' + state.sttMode);
+                });
+            });
+        });
+
+        window.addEventListener('beforeunload', stopCall);
+    </script>
+</body>
+</html>

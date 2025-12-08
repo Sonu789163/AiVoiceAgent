@@ -1,0 +1,432 @@
+/**
+ * Conversation State Manager
+ * Tracks collected information and provides context for the AI agent
+ */
+
+export class ConversationState {
+  constructor(sessionId = null) {
+    this.sessionId = sessionId || Date.now().toString(); // Create session ID using Date.now()
+    this.startTime = new Date().toISOString();
+    this.endTime = null;
+    this.sheetRowNumber = null; // Track which row in Google Sheets this session uses
+    this.sessionIdUpdated = false; // Track if session ID has been written to sheet
+    this.updateSheetsCallback = null; // Callback function to update Google Sheets
+    this.collectedData = {
+      name: null,
+      phoneNumber: null,
+      programInterest: null,
+      priorEducation: null,
+      intakeYear: null,
+      city: null,
+      budget: null,
+    };
+  }
+
+  /**
+   * Set callback function to update Google Sheets when data is extracted
+   * @param {Function} callback - Function to call with (fieldName, value)
+   */
+  setSheetsUpdateCallback(callback) {
+    this.updateSheetsCallback = callback;
+  }
+
+  /**
+   * Update a field and immediately save to Google Sheets
+   * @param {string} fieldName - Name of the field
+   * @param {*} value - Value to set
+   */
+  async updateFieldAndSave(fieldName, value) {
+    const oldValue = this.collectedData[fieldName];
+    this.collectedData[fieldName] = value;
+    
+    // If value changed and we have a callback, update Google Sheets
+    if (value && value !== oldValue && this.updateSheetsCallback) {
+      try {
+        await this.updateSheetsCallback(fieldName, value);
+      } catch (error) {
+        console.error(`❌ Error updating ${fieldName} in Google Sheets:`, error);
+        // Don't throw - allow conversation to continue
+      }
+    }
+  }
+
+  /**
+   * Extract information from user message and update state
+   * @param {string} userMessage - User's message
+   * @param {string} assistantResponse - Assistant's response (for context)
+   */
+  updateFromMessage(userMessage, assistantResponse = '') {
+    const message = userMessage.toLowerCase();
+    
+    // Extract name (patterns: "my name is", "i'm", "i am", "call me", "name is")
+    if (!this.collectedData.name) {
+      const namePatterns = [
+        /(?:my name is|i'?m|i am|call me|name is|this is)\s+([a-z]+(?:\s+[a-z]+)?)/i,
+        /^([a-z]+(?:\s+[a-z]+)?)(?:\s+here|\s+speaking)/i,
+      ];
+      
+      for (const pattern of namePatterns) {
+        const match = message.match(pattern);
+        if (match && match[1]) {
+          const name = match[1].trim();
+          // Filter out common false positives
+          if (!['hello', 'hi', 'yes', 'no', 'okay', 'ok'].includes(name.toLowerCase())) {
+            this.collectedData.name = name;
+            console.log('📝 Extracted name:', name);
+            // Update Google Sheets immediately
+            if (this.updateSheetsCallback) {
+              this.updateSheetsCallback('name', name).catch(err => 
+                console.error('❌ Error updating name in sheets:', err)
+              );
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    // Extract phone number
+    if (!this.collectedData.phoneNumber) {
+      // Remove spaces and dashes for easier matching
+      const cleanMessage = message.replace(/[\s-]/g, '');
+      
+      // Try to extract 10-digit numbers (most common)
+      let phoneMatch = cleanMessage.match(/([6-9]\d{9})/);
+      if (phoneMatch && phoneMatch[1]) {
+        this.collectedData.phoneNumber = phoneMatch[1];
+        console.log('📝 Extracted phone number:', phoneMatch[1]);
+      } else {
+        // Try with +91 prefix
+        phoneMatch = cleanMessage.match(/(?:\+91)?([6-9]\d{9})/);
+        if (phoneMatch && phoneMatch[1]) {
+          this.collectedData.phoneNumber = phoneMatch[1];
+          console.log('📝 Extracted phone number:', phoneMatch[1]);
+        } else {
+          // Try any 9-10 digit sequence (might be missing first digit)
+          phoneMatch = message.match(/(\d{9,10})/);
+          if (phoneMatch && phoneMatch[1]) {
+            const phone = phoneMatch[1];
+            // If 9 digits, might be missing leading digit - try to validate
+            if (phone.length === 9 && /^[6-9]/.test(phone)) {
+              // Could be valid, but we prefer 10 digits
+              // Only use if it's clearly a phone number context
+              if (message.match(/phone|number|mobile|contact/i)) {
+                this.collectedData.phoneNumber = phone;
+                console.log('📝 Extracted phone number (9 digits):', phone);
+              }
+            } else if (phone.length === 10 && /^[6-9]/.test(phone)) {
+              this.collectedData.phoneNumber = phone;
+              console.log('📝 Extracted phone number:', phone);
+              // Update Google Sheets immediately
+              if (this.updateSheetsCallback) {
+                this.updateSheetsCallback('phoneNumber', phone).catch(err => 
+                  console.error('❌ Error updating phone in sheets:', err)
+                );
+              }
+            }
+          }
+        }
+      }
+      
+      // Also try patterns with context words
+      if (!this.collectedData.phoneNumber) {
+        const contextPatterns = [
+          /phone.*?(\d{9,10})/i,
+          /number.*?(\d{9,10})/i,
+          /mobile.*?(\d{9,10})/i,
+        ];
+        
+        for (const pattern of contextPatterns) {
+          const match = message.match(pattern);
+          if (match && match[1]) {
+            const phone = match[1].replace(/[\s-]/g, '');
+            if (phone.length >= 9 && /^[6-9]/.test(phone)) {
+              // Pad to 10 digits if needed (add leading digit)
+              this.collectedData.phoneNumber = phone.length === 9 ? '9' + phone : phone;
+              console.log('📝 Extracted phone number:', this.collectedData.phoneNumber);
+              // Update Google Sheets immediately
+              if (this.updateSheetsCallback) {
+                this.updateSheetsCallback('phoneNumber', this.collectedData.phoneNumber).catch(err => 
+                  console.error('❌ Error updating phone in sheets:', err)
+                );
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // Extract program interest
+    if (!this.collectedData.programInterest) {
+      const interestKeywords = {
+        'culinary': ['culinary', 'cooking', 'chef', 'kitchen', 'culinary arts', 'culinary art'],
+        'front office': ['front office', 'reception', 'front desk', 'frontoffice'],
+        'housekeeping': ['housekeeping', 'house keeping', 'house-keeping'],
+        'food and beverage': ['food and beverage', 'food beverage', 'food & beverage', 'f&b', 'restaurant', 'f and b'],
+        'hospitality': ['hospitality', 'hotel management', 'hotel'],
+      };
+      
+      // Check for exact matches first (longer phrases)
+      for (const [interest, keywords] of Object.entries(interestKeywords)) {
+        // Sort keywords by length (longest first) to match longer phrases first
+        const sortedKeywords = keywords.sort((a, b) => b.length - a.length);
+        for (const keyword of sortedKeywords) {
+          if (message.includes(keyword.toLowerCase())) {
+            this.collectedData.programInterest = interest;
+            console.log('📝 Extracted program interest:', interest, 'from keyword:', keyword);
+            // Update Google Sheets immediately
+            if (this.updateSheetsCallback) {
+              this.updateSheetsCallback('programInterest', interest).catch(err => 
+                console.error('❌ Error updating interest in sheets:', err)
+              );
+            }
+            break;
+          }
+        }
+        if (this.collectedData.programInterest) break;
+      }
+    }
+
+    // Extract prior education
+    if (!this.collectedData.priorEducation) {
+      if (message.match(/\b(12th|twelfth|12|twelve|high school|hsc)\b/i)) {
+        this.collectedData.priorEducation = '12th';
+        console.log('📝 Extracted prior education: 12th');
+        // Update Google Sheets immediately
+        if (this.updateSheetsCallback) {
+          this.updateSheetsCallback('priorEducation', '12th').catch(err => 
+            console.error('❌ Error updating education in sheets:', err)
+          );
+        }
+      } else if (message.match(/\b(graduate|graduation|degree|bachelor|b\.?a\.?|b\.?com|b\.?sc)\b/i)) {
+        this.collectedData.priorEducation = 'Graduate';
+        console.log('📝 Extracted prior education: Graduate');
+        // Update Google Sheets immediately
+        if (this.updateSheetsCallback) {
+          this.updateSheetsCallback('priorEducation', 'Graduate').catch(err => 
+            console.error('❌ Error updating education in sheets:', err)
+          );
+        }
+      }
+    }
+
+    // Extract intake year
+    if (!this.collectedData.intakeYear) {
+      // Match years 2024-2099
+      const yearMatch = message.match(/\b(20[2-9][0-9])\b/);
+      if (yearMatch) {
+        const year = parseInt(yearMatch[1]);
+        if (year >= 2024 && year <= 2099) {
+          this.collectedData.intakeYear = yearMatch[1];
+          console.log('📝 Extracted intake year:', yearMatch[1]);
+          // Update Google Sheets immediately
+          if (this.updateSheetsCallback) {
+            this.updateSheetsCallback('intakeYear', yearMatch[1]).catch(err => 
+              console.error('❌ Error updating year in sheets:', err)
+            );
+          }
+        }
+      } else if (message.match(/\b(next year|coming year)\b/i)) {
+        // Default to next year if mentioned
+        this.collectedData.intakeYear = String(new Date().getFullYear() + 1);
+        console.log('📝 Extracted intake year: Next year');
+        // Update Google Sheets immediately
+        if (this.updateSheetsCallback) {
+          this.updateSheetsCallback('intakeYear', this.collectedData.intakeYear).catch(err => 
+            console.error('❌ Error updating year in sheets:', err)
+          );
+        }
+      }
+    }
+
+    // Extract city
+    if (!this.collectedData.city) {
+      // Common Indian cities
+      const cities = [
+        'mumbai', 'delhi', 'bangalore', 'hyderabad', 'chennai', 'kolkata',
+        'pune', 'ahmedabad', 'jaipur', 'lucknow', 'kanpur', 'nagpur',
+        'indore', 'thane', 'bhopal', 'visakhapatnam', 'patna', 'vadodara',
+        'ghaziabad', 'ludhiana', 'agra', 'nashik', 'faridabad', 'meerut',
+        'rajkot', 'varanasi', 'srinagar', 'amritsar', 'jodhpur', 'raipur'
+      ];
+      
+      for (const city of cities) {
+        if (message.includes(city)) {
+          this.collectedData.city = city.charAt(0).toUpperCase() + city.slice(1);
+          console.log('📝 Extracted city:', this.collectedData.city);
+          // Update Google Sheets immediately
+          if (this.updateSheetsCallback) {
+            this.updateSheetsCallback('city', this.collectedData.city).catch(err => 
+              console.error('❌ Error updating city in sheets:', err)
+            );
+          }
+          break;
+        }
+      }
+    }
+
+    // Extract budget
+    if (!this.collectedData.budget) {
+      // Patterns: "5 lakhs", "5 lacs", "500000", "5L", etc.
+      const budgetPatterns = [
+        /(\d+)\s*(?:lakh|lac|L)\b/i,
+        /(\d{4,})\s*(?:rupees?|rs|inr)?/i,
+        /budget.*?(\d+)\s*(?:lakh|lac|L)?/i,
+      ];
+      
+      for (const pattern of budgetPatterns) {
+        const match = message.match(pattern);
+        if (match && match[1]) {
+          let budget = match[1];
+          // Convert lakhs to number if needed
+          if (message.match(/lakh|lac|L/i)) {
+            budget = String(parseInt(budget) * 100000);
+          }
+          this.collectedData.budget = budget;
+          console.log('📝 Extracted budget:', budget);
+          // Update Google Sheets immediately
+          if (this.updateSheetsCallback) {
+            this.updateSheetsCallback('budget', budget).catch(err => 
+              console.error('❌ Error updating budget in sheets:', err)
+            );
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  /**
+   * Get context string for system prompt
+   * @returns {string} Context about collected information
+   */
+  getContextString() {
+    const collected = [];
+    const missing = [];
+
+    if (this.collectedData.name) {
+      collected.push(`Name: ${this.collectedData.name}`);
+    } else {
+      missing.push('Name');
+    }
+
+    if (this.collectedData.programInterest) {
+      collected.push(`Program Interest: ${this.collectedData.programInterest}`);
+    } else {
+      missing.push('Program Interest');
+    }
+
+    if (this.collectedData.priorEducation) {
+      collected.push(`Prior Education: ${this.collectedData.priorEducation}`);
+    } else {
+      missing.push('Prior Education');
+    }
+
+    if (this.collectedData.intakeYear) {
+      collected.push(`Intake Year: ${this.collectedData.intakeYear}`);
+    } else {
+      missing.push('Intake Year');
+    }
+
+    if (this.collectedData.city) {
+      collected.push(`City: ${this.collectedData.city}`);
+    } else {
+      missing.push('City');
+    }
+
+    if (this.collectedData.budget) {
+      collected.push(`Budget: ${this.collectedData.budget}`);
+    } else {
+      missing.push('Budget');
+    }
+
+    if (this.collectedData.phoneNumber) {
+      collected.push(`Phone Number: ${this.collectedData.phoneNumber}`);
+    } else {
+      missing.push('Phone Number');
+    }
+
+    let context = '';
+    
+    if (collected.length > 0) {
+      context += `\n\n### 📋 COLLECTED INFORMATION SO FAR:\n${collected.join('\n')}\n`;
+    }
+    
+    if (missing.length > 0) {
+      context += `\n### 🎯 STILL NEED TO COLLECT:\n${missing.join(', ')}\n`;
+      context += `\n**NEXT QUESTION:** Ask about: ${missing[0]}\n`;
+    } else {
+      context += `\n### ✅ ALL INFORMATION COLLECTED!\nYou have collected all required information. Thank the user and let them know they will be contacted soon.\n`;
+    }
+
+    return context;
+  }
+
+  /**
+   * Get collected data as object
+   * @returns {Object} Collected data
+   */
+  getCollectedData() {
+    return { ...this.collectedData };
+  }
+
+  /**
+   * Get summary of collected data for logging
+   * @returns {string} Summary string
+   */
+  getDataSummary() {
+    const data = this.collectedData;
+    const fields = [];
+    if (data.name) fields.push(`Name: ${data.name}`);
+    if (data.phoneNumber) fields.push(`Phone: ${data.phoneNumber}`);
+    if (data.programInterest) fields.push(`Interest: ${data.programInterest}`);
+    if (data.city) fields.push(`City: ${data.city}`);
+    if (data.intakeYear) fields.push(`Year: ${data.intakeYear}`);
+    if (data.priorEducation) fields.push(`Education: ${data.priorEducation}`);
+    if (data.budget) fields.push(`Budget: ${data.budget}`);
+    return fields.length > 0 ? fields.join(', ') : 'No data collected yet';
+  }
+
+  /**
+   * Reset conversation state
+   */
+  /**
+   * Close the session
+   */
+  closeSession() {
+    this.endTime = new Date().toISOString();
+    console.log(`🔄 Session ${this.sessionId} closed at ${this.endTime}`);
+  }
+
+  /**
+   * Get session information
+   */
+  getSessionInfo() {
+    return {
+      sessionId: this.sessionId,
+      startTime: this.startTime,
+      endTime: this.endTime,
+    };
+  }
+
+  reset() {
+    // Create new session ID for reset
+    this.sessionId = Date.now().toString();
+    this.startTime = new Date().toISOString();
+    this.endTime = null;
+    this.collectedData = {
+      name: null,
+      phoneNumber: null,
+      programInterest: null,
+      priorEducation: null,
+      intakeYear: null,
+      city: null,
+      budget: null,
+    };
+    console.log('🔄 Conversation state reset with new session:', this.sessionId);
+  }
+}
+
+
+

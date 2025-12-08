@@ -1,0 +1,33 @@
+{
+  "name": "voice-ai-agent-backend",
+  "version": "1.0.0",
+  "description": "Real-Time Voice AI Agent Backend with Web Speech API STT, OpenAI LLM, and ElevenLabs TTS",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "voice",
+    "ai",
+    "websocket",
+    "web-speech-api",
+    "openai",
+    "elevenlabs"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@deepgram/sdk": "^4.11.2",
+    "@fastify/websocket": "^10.0.0",
+    "axios": "^1.6.7",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.26.0",
+    "googleapis": "^167.0.0",
+    "openai": "^4.28.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Continuous Voice AI</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #f4f6f8; color: #333; }
+        .container { text-align: center; background: white; padding: 50px; border-radius: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); width: 350px; }
+        h2 { margin-top: 0; color: #2c3e50; }
+        
+        #status { 
+            margin: 20px 0; font-weight: 600; color: #007bff; min-height: 24px; font-size: 1.1em;
+        }
+
+        .button-wrapper { position: relative; display: inline-block; margin: 20px 0; }
+        .start-btn {
+            padding: 15px 40px; border-radius: 30px; border: none; cursor: pointer;
+            background-color: #007bff; color: white; font-size: 1.1em; font-weight: 600;
+            box-shadow: 0 4px 15px rgba(0,123,255,0.3); transition: all 0.3s ease;
+        }
+        .start-btn:hover { transform: scale(1.05); background-color: #0056b3; }
+        .start-btn.active { background-color: #dc3545; }
+        
+        .mic-indicator {
+            display: none; margin: 15px 0; font-size: 1.2em;
+        }
+        .mic-indicator.active {
+            display: block;
+        }
+        .mic-indicator .pulse-ring {
+            position: relative; display: inline-block; width: 40px; height: 40px;
+            border-radius: 50%; background-color: #007bff; opacity: 0; margin-right: 10px;
+            vertical-align: middle;
+        }
+        .mic-indicator.active .pulse-ring { animation: pulse 1.5s infinite; }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.6; }
+            100% { transform: scale(1.6); opacity: 0; }
+        }
+
+        #transcript { 
+            margin-top: 20px; color: #666; font-style: italic; font-size: 0.95em; line-height: 1.4;
+            background: #f8f9fa; padding: 10px; border-radius: 8px; min-height: 40px;
+        }
+
+        .controls { margin-top: 20px; display: flex; gap: 10px; justify-content: center;}
+        button.secondary { padding: 8px 16px; border: 1px solid #ccc; background: white; border-radius: 20px; cursor: pointer; font-size: 0.9em; }
+        button.secondary:hover { background: #eee; }
+
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Admissions AI</h2>
+    
+    <div id="status">Ready to Start</div>
+
+    <div class="button-wrapper">
+        <button id="startBtn" class="start-btn">Start Call</button>
+    </div>
+
+    <div id="micIndicator" class="mic-indicator">
+        <div class="pulse-ring"></div>
+        <span>🎙️ Listening...</span>
+    </div>
+
+    <div id="transcript">Click "Start Call" to begin...</div>
+
+    <div class="controls">
+        <button id="stopBtn" class="secondary" style="display:none;">End Call ❌</button>
+    </div>
+</div>
+
+<script>
+    // --- CONFIGURATION ---
+    // ⚠️ REPLACE WITH YOUR AZURE N8N URL
+    const N8N_WEBHOOK_URL = "http://localhost:5678/webhook/web-voice-bot"; 
+    // ---------------------
+    
+    // --- AGENT PROMPT CONFIGURATION (Configure in N8N) ---
+    
+
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusEl = document.getElementById('status');
+    const transcriptEl = document.getElementById('transcript');
+    const micIndicator = document.getElementById('micIndicator');
+
+    let isConversationActive = false;
+    let sessionId = null; // Session ID for maintaining conversation context
+    
+    // --- AUDIO FIX: GLOBAL AUDIO OBJECT ---
+    const agentAudio = new Audio();
+    // --------------------------------------
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) alert("Please use Chrome or Edge.");
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US'; 
+    recognition.interimResults = false;
+    recognition.continuous = false;
+
+    // --- CLICK HANDLERS ---
+
+    startBtn.addEventListener('click', () => {
+        if (!isConversationActive) {
+            unlockAudio(); // <--- CRITICAL FIX: Unlock audio on first click
+            startConversation();
+        }
+    });
+
+    stopBtn.addEventListener('click', stopConversation);
+
+    // --- UNLOCK AUDIO FUNCTION ---
+    function unlockAudio() {
+        // Play a tiny silent sound to unlock browser autoplay restrictions
+        agentAudio.src = "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjIyLjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV6urq6urq6urq6urq6urq6urq6urq6urq";
+        agentAudio.play().catch(e => console.log("Audio unlock failed (harmless if already unlocked)", e));
+    }
+
+    // --- SESSION ID GENERATION ---
+    function generateSessionId() {
+        // Generate a unique session ID using timestamp and random string
+        return `session_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    }
+
+    // --- LOGIC ---
+
+    async function startConversation() {
+        isConversationActive = true;
+        // Generate a new session ID for this conversation
+        sessionId = generateSessionId();
+        console.log("Session ID:", sessionId);
+        
+        startBtn.style.display = "none";
+        stopBtn.style.display = "inline-block";
+        transcriptEl.textContent = 'You: "hello"';
+        statusEl.textContent = "Connecting...";
+        
+        // Immediately send "hello" to start the conversation
+        await sendToAI("hello");
+    }
+
+    function stopConversation() {
+        isConversationActive = false;
+        sessionId = null; // Reset session ID when conversation ends
+        agentAudio.pause(); // Stop speaking instantly
+        recognition.stop(); // Stop listening
+        statusEl.textContent = "Conversation Ended";
+        startBtn.style.display = "inline-block";
+        startBtn.classList.remove('active');
+        stopBtn.style.display = "none";
+        micIndicator.classList.remove('active');
+        transcriptEl.textContent = "Click 'Start Interview' to begin...";
+    }
+
+    function startListening() {
+        if (!isConversationActive) return;
+        try { recognition.start(); } catch (e) { console.warn("Mic already on"); }
+    }
+
+    recognition.onstart = () => {
+        statusEl.textContent = "I'm Listening...";
+        micIndicator.classList.add('active');
+    };
+
+    recognition.onend = () => {
+        micIndicator.classList.remove('active');
+    };
+
+    recognition.onresult = async (event) => {
+        const userText = event.results[0][0].transcript;
+        transcriptEl.textContent = `You: "${userText}"`;
+        statusEl.textContent = "Thinking...";
+        recognition.stop(); 
+        await sendToAI(userText);
+    };
+
+    async function sendToAI(text) {
+        try {
+            const response = await fetch(N8N_WEBHOOK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    message: text,
+                    sessionId: sessionId 
+                })
+            });
+
+            if (!response.ok) throw new Error("Server Error");
+
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            
+            // Reuse the GLOBAL agentAudio object (which is already unlocked)
+            agentAudio.src = audioUrl;
+            
+            statusEl.textContent = "Agent Speaking...";
+            
+            // Handle Play Promise to catch specific browser blocks
+            try {
+                await agentAudio.play();
+            } catch (playError) {
+                console.error("Playback blocked:", playError);
+                statusEl.textContent = "Tap here to Play Audio";
+                // Add a one-time click handler to document to fix it if it fails
+                document.body.addEventListener('click', () => agentAudio.play(), { once: true });
+            }
+
+            agentAudio.onended = () => {
+                if (isConversationActive) {
+                    startListening();
+                }
+            };
+
+        } catch (error) {
+            console.error(error);
+            statusEl.textContent = "Connection Error";
+            isConversationActive = false;
+        }
+    }
+</script>
+
+</body>
+</html>
+
