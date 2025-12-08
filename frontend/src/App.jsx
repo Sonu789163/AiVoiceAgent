@@ -1,7 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-const WS_URL = import.meta.env.VITE_WS_URL;
+const WS_URL = (() => {
+  const url = import.meta.env.VITE_WS_URL;
+  // Convert HTTP/HTTPS to WS/WSS for WebSocket connections
+  if (url.startsWith('https://')) {
+    return url.replace('https://', 'wss://');
+  } else if (url.startsWith('http://')) {
+    return url.replace('http://', 'ws://');
+  }
+  return url; // Already ws:// or wss://
+})();
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
