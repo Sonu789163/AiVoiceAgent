@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/connection';
+const WS_URL = import.meta.env.VITE_WS_URL;
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
