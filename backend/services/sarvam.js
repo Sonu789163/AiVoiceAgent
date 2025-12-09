@@ -1,14 +1,4 @@
 import axios from 'axios';
-import FormData from 'form-data';
-
-// Helper to get Sarvam API key safely
-const getSarvamKey = () => {
-    const apiKey = process.env.SARVAM_API_KEY;
-    if (!apiKey) {
-        throw new Error('SARVAM_API_KEY is not set in environment variables');
-    }
-    return apiKey;
-};
 
 /**
  * Stream TTS audio from Sarvam AI API
@@ -210,54 +200,5 @@ export async function testSarvamConnection() {
     } catch (error) {
         console.error('❌ Sarvam AI TTS connection test failed:', error.message);
         return false;
-    }
-}
-
-/**
- * Transcribe audio using Sarvam AI STT (Saarika V2.5)
- * @param {Buffer} audioBuffer - WAV/MP3 audio buffer
- * @returns {Promise<string>} Transcribed text
- */
-export async function transcribeAudio(audioBuffer) {
-    try {
-        const start = Date.now();
-        const apiKey = getSarvamKey();
-
-        const form = new FormData();
-        form.append('model', 'saarika:v2.5');
-        form.append('language_code', 'en-IN');
-        // 'file' is the key expected by Sarvam. We give it a filename 'audio.wav' and content type
-        form.append('file', audioBuffer, {
-            filename: 'audio.wav',
-            contentType: 'audio/wav',
-        });
-
-        console.log('📤 Sending audio to Sarvam STT (saarika:v2.5)... size:', audioBuffer.length);
-
-        const response = await axios.post('https://api.sarvam.ai/speech-to-text', form, {
-            headers: {
-                'api-subscription-key': apiKey,
-                ...form.getHeaders(),
-            },
-            // Increase timeout for longer audio
-            timeout: 10000,
-        });
-
-        const duration = Date.now() - start;
-        console.log(`✅ Sarvam STT completed in ${duration}ms`);
-
-        // Sarvam response format: { transcript: "text", ... }
-        const transcript = response.data.transcript;
-
-        if (!transcript) {
-            console.warn('⚠️ Sarvam returned empty transcript:', response.data);
-            return '';
-        }
-
-        console.log('📝 Transcription:', transcript);
-        return transcript;
-    } catch (error) {
-        console.error('❌ Sarvam STT Error:', error.response?.data || error.message);
-        throw error;
     }
 }

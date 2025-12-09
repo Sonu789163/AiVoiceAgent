@@ -38,7 +38,7 @@ console.log('✅ All required environment variables are set\n');
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import { streamChatCompletion } from './services/openai.js';
-import { streamSarvamTTS, transcribeAudio } from './services/sarvam.js';
+import { streamSarvamTTS } from './services/sarvam.js';
 import { ConversationState } from './services/conversationState.js';
 import { saveToGoogleSheets, updateFieldInGoogleSheets } from './services/googleSheets.js';
 
@@ -279,39 +279,22 @@ fastify.register(async function (fastify) {
 
       // Handle incoming messages from client
       socket.on('message', async (message) => {
-        // Check if message is binary (Buffer) for Sarvam Audio STT
-        if (Buffer.isBuffer(message)) {
-          console.log('🎤 Received audio buffer from client, size:', message.length);
+        // Check if message is text (transcript from Web Speech API)
+        if (typeof message === 'string' || message instanceof String || Buffer.isBuffer(message) && message.toString().startsWith('{')) {
           try {
-            // Send to Sarvam STT
-            const start = Date.now();
-            console.log('📤 Transcribing with Sarvam STT...');
-            const text = await transcribeAudio(message);
-            const duration = Date.now() - start;
-
-            if (text && text.trim()) {
-              console.log(`✅ Sarvam STT result (${duration}ms):`, text);
-              // Process the transcript
-              await processTranscript(text);
-            } else {
-              console.log('⚠️ Sarvam STT returned empty text');
-            }
-          } catch (error) {
-            console.error('❌ Error processing audio with Sarvam STT:', error.message);
-            socket.send(JSON.stringify({ error: 'STT failed: ' + error.message }));
-          }
-          return;
-        }
-
-        // Check if message is text (legacy/control messages)
-        if (typeof message === 'string' || message instanceof String || (Buffer.isBuffer(message) && message.toString().startsWith('{'))) {
-          try {
-            const msgString = Buffer.isBuffer(message) ? message.toString() : message;
-            const data = JSON.parse(msgString);
+            const data = typeof message === 'string' ? JSON.parse(message) : JSON.parse(message.toString());
 
             if (data.type === 'stop_generation') {
               console.log('🛑 Received stop_generation signal (Barge-in)');
               processingState.shouldCancel = true;
+              return;
+            }
+
+            if (data.type === 'transcript' && data.text) {
+              console.log('📝 Received transcript from Web Speech API:', data.text);
+              processTranscript(data.text).catch((error) => {
+                console.error('Error in processTranscript:', error);
+              });
               return;
             }
 
