@@ -33,14 +33,21 @@ function App() {
   const pcmBufferRef = useRef(new Uint8Array(0)); // Buffer for accumulating PCM chunks
   const lastChunkTimeRef = useRef(Date.now()); // Track last chunk arrival time for network monitoring
   const networkMonitorRef = useRef(null); // Network monitoring interval
+  const silenceTimerRef = useRef(null); // Timer for Turbo VAD
+  const lastSpeechTimeRef = useRef(0); // Timestamp of last interim speech
+  const interimTranscriptRef = useRef(''); // Buffer for interim transcript
 
   useEffect(() => {
     return () => {
       // Cleanup on unmount
       // Stop network monitoring
-      if (networkMonitorRef.current) {
-        clearInterval(networkMonitorRef.current);
-        networkMonitorRef.current = null;
+      clearInterval(networkMonitorRef.current);
+      networkMonitorRef.current = null;
+
+      // Stop Turbo VAD timer
+      if (silenceTimerRef.current) {
+        clearInterval(silenceTimerRef.current);
+        silenceTimerRef.current = null;
       }
 
       if (wsRef.current) {
@@ -648,6 +655,45 @@ function App() {
           setStatus('listening');
         };
 
+        // Turbo VAD: Track interim speech to detect silence faster than the API
+        const silenceThreshold = 700; // ms of silence to consider "done"
+
+        // Clear any previous interval
+        if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
+
+        silenceTimerRef.current = setInterval(() => {
+          if (!isCallActiveRef.current || !recognitionRef.current) return;
+
+          const now = Date.now();
+          const timeSinceLastSpeech = now - lastSpeechTimeRef.current;
+          const hasInterim = interimTranscriptRef.current && interimTranscriptRef.current.trim().length > 0;
+
+          // If we have pending speech and enough silence has passed
+          if (hasInterim && timeSinceLastSpeech > silenceThreshold) {
+            console.log(`🚀 Turbo VAD: Silence detected (${timeSinceLastSpeech}ms) - Sending transcript manually`);
+
+            const textToSend = interimTranscriptRef.current.trim();
+
+            // Send if valid
+            if (textToSend && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              console.log('📝 Turbo VAD Sending:', textToSend);
+              wsRef.current.send(JSON.stringify({
+                type: 'transcript',
+                text: textToSend
+              }));
+
+              // Clear buffer immediately to prevent double sending
+              interimTranscriptRef.current = '';
+
+              // Force restart recognition to clear internal API buffer
+              // This prevents the API from sending a "final" event later with the same text
+              try {
+                recognitionRef.current.abort();
+              } catch (e) { console.warn('Abort failed', e); }
+            }
+          }
+        }, 100);
+
         recognition.onresult = (event) => {
           let finalTranscript = '';
           let interimTranscript = '';
@@ -661,10 +707,25 @@ function App() {
             }
           }
 
+          // Debug logs for tuning
+          // console.log('Speech Event:', { final: finalTranscript, interim: interimTranscript });
+
+          // Update refs for Turbo VAD
+          if (interimTranscript.trim().length > 0) {
+            lastSpeechTimeRef.current = Date.now();
+            interimTranscriptRef.current = interimTranscript;
+          } else if (finalTranscript.trim().length > 0) {
+            // If we got a final, clear interim logic so we don't double send
+            interimTranscriptRef.current = '';
+            lastSpeechTimeRef.current = Date.now();
+          }
+
           // BARGE-IN LOGIC: If user speaks while agent is speaking, stop the agent!
           if (isSpeakingRef.current && (finalTranscript || interimTranscript.length > 2)) {
             console.log('🗣️ User starts speaking - Interrupting agent (Barge-in)');
             stopAgentSpeech();
+            // Clear interim buffer on barge-in to avoid processing old speech
+            interimTranscriptRef.current = '';
 
             // Optionally send stop signal to backend to cancel generation
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -673,10 +734,10 @@ function App() {
           }
 
           // Send final transcript to backend
+          // Note: Turbo VAD might have already sent this if it was slow.
+          // But if the API is fast enough, we send it here.
           if (finalTranscript.trim()) {
-            console.log('📝 Final transcript:', finalTranscript.trim());
-            // Filter out echo (simple check: if transcript matches what agent just said)
-            // Ideally backend handles this logic or we use headphones.
+            console.log('📝 Final transcript (API):', finalTranscript.trim());
 
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
               wsRef.current.send(JSON.stringify({
@@ -684,11 +745,13 @@ function App() {
                 text: finalTranscript.trim()
               }));
             }
+            // Clear interim ref since we just sent final
+            interimTranscriptRef.current = '';
           }
         };
 
         recognition.onerror = (event) => {
-          // 'aborted' is expected when we manually stop/restart - ignore it
+          // 'aborted' is expected when we Turbo VAD abort or manually stop - ignore it
           if (event.error === 'aborted') {
             return;
           }
@@ -697,7 +760,7 @@ function App() {
 
           // CRITICAL: Always try to restart for persistent listening
           if (isCallActiveRef.current) {
-            const restartDelay = event.error === 'no-speech' ? 100 : 300;
+            const restartDelay = event.error === 'no-speech' ? 50 : 200; // Even faster restart
             setTimeout(() => {
               if (isCallActiveRef.current && recognitionRef.current) {
                 // Don't restart if already started (handled by catch block in restartRecognition)
