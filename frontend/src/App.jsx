@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 const WS_URL = (() => {
-  const url = import.meta.env.VITE_WS_URL ;
+  const url = import.meta.env.VITE_WS_URL;
+  // import.meta.env.VITE_WS_URL ;
   // Convert HTTP/HTTPS to WS/WSS for WebSocket connections
   if (url.startsWith('https://')) {
     return url.replace('https://', 'wss://');
@@ -31,10 +32,6 @@ function App() {
   const isSpeakingRef = useRef(false); // Track if currently speaking
   const pcmBufferRef = useRef(new Uint8Array(0)); // Buffer for accumulating PCM chunks
   const lastChunkTimeRef = useRef(Date.now()); // Track last chunk arrival time for network monitoring
-  // VAD and Audio Recording Refs
-  const bufferedAudioRef = useRef([]); // Accumulate PCM chunks
-  const silenceStartRef = useRef(null); // Track silence duration
-  const lastVadLogRef = useRef(0); // Rate limit logs
   const networkMonitorRef = useRef(null); // Network monitoring interval
 
   useEffect(() => {
@@ -269,10 +266,10 @@ function App() {
                     console.error('❌ Final retry failed:', e3.message);
                   }
                 }
-              }, 500);
+              }, 300);
             }
           }
-        }, 300);
+        }, 200);
       }
     }
   };
@@ -572,54 +569,6 @@ function App() {
     return buffer;
   };
 
-  // Helper to convert processed PCM audio to WAV format for Sarvam API
-  const convertPCMToWav = (pcmData) => {
-    const numChannels = 1;
-    const sampleRate = 16000;
-    const bitsPerSample = 16;
-    const byteRate = sampleRate * numChannels * bitsPerSample / 8;
-    const blockAlign = numChannels * bitsPerSample / 8;
-    const dataSize = pcmData.length * 2; // 16-bit samples
-    const buffer = new ArrayBuffer(44 + dataSize);
-    const view = new DataView(buffer);
-
-    // RIFF chunk descriptor
-    writeString(view, 0, 'RIFF');
-    view.setUint32(4, 36 + dataSize, true);
-    writeString(view, 8, 'WAVE');
-
-    // fmt sub-chunk
-    writeString(view, 12, 'fmt ');
-    view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
-    view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
-    view.setUint16(22, numChannels, true); // NumChannels
-    view.setUint32(24, sampleRate, true); // SampleRate
-    view.setUint32(28, byteRate, true); // ByteRate
-    view.setUint16(32, blockAlign, true); // BlockAlign
-    view.setUint16(34, bitsPerSample, true); // BitsPerSample
-
-    // data sub-chunk
-    writeString(view, 36, 'data');
-    view.setUint32(40, dataSize, true);
-
-    // Write PCM samples
-    for (let i = 0; i < pcmData.length; i++) {
-      // Clamp data to [-1, 1]
-      let s = Math.max(-1, Math.min(1, pcmData[i]));
-      // Convert to 16-bit PCM
-      s = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      view.setInt16(44 + (i * 2), s, true);
-    }
-
-    return buffer;
-  };
-
-  const writeString = (view, offset, string) => {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
-    }
-  };
-
   const startCall = async () => {
     try {
       setError(null);
@@ -643,28 +592,147 @@ function App() {
         }
       }
 
+      // Create gain node early
+      if (!audioContextRef.current.gainNode) {
+        audioContextRef.current.gainNode = audioContextRef.current.createGain();
+        audioContextRef.current.gainNode.gain.value = 1.0;
+        audioContextRef.current.gainNode.connect(audioContextRef.current.destination);
+        console.log('✅ Gain node created');
+      }
 
-      // Initialize WebSocket if needed
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        console.log('🔄 WebSocket not ready, connecting...');
+      // Connect WebSocket if not connected
+      if (!isConnected || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
         connectWebSocket();
-        // Wait for connection
+
+        // Wait for connection with timeout
         let attempts = 0;
-        while ((!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) && attempts < 20) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+        const maxAttempts = 20; // 2 seconds total
+
+        while (attempts < maxAttempts) {
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            setIsConnected(true);
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
           attempts++;
         }
+
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-          throw new Error('Failed to connect to server');
+          const state = wsRef.current ? wsRef.current.readyState : 'null';
+          const stateNames = { 0: 'CONNECTING', 1: 'OPEN', 2: 'CLOSING', 3: 'CLOSED' };
+          console.error('WebSocket connection failed. State:', state, stateNames[state] || 'UNKNOWN');
+
+          // Check if connection was closed
+          if (state === 3 || state === 'CLOSED') {
+            setError('Connection closed. Please check backend logs - Deepgram initialization may have failed.');
+          } else {
+            setError('Failed to connect to server. Please ensure the backend is running on port 8080.');
+          }
+          return;
         }
       }
 
-      // Resume AudioContext if suspended
-      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
+      // Use Web Speech API (free) or Deepgram (backend)
+      if (useWebSpeechAPI && 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        console.log('🎤 Using Web Speech API (FREE) for STT');
+
+        // Initialize Web Speech API
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = () => {
+          console.log('✅ Web Speech API started');
+          setStatus('listening');
+        };
+
+        recognition.onresult = (event) => {
+          let finalTranscript = '';
+          let interimTranscript = '';
+
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript + ' ';
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+
+          // BARGE-IN LOGIC: If user speaks while agent is speaking, stop the agent!
+          if (isSpeakingRef.current && (finalTranscript || interimTranscript.length > 2)) {
+            console.log('🗣️ User starts speaking - Interrupting agent (Barge-in)');
+            stopAgentSpeech();
+
+            // Optionally send stop signal to backend to cancel generation
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({ type: 'stop_generation' }));
+            }
+          }
+
+          // Send final transcript to backend
+          if (finalTranscript.trim()) {
+            console.log('📝 Final transcript:', finalTranscript.trim());
+            // Filter out echo (simple check: if transcript matches what agent just said)
+            // Ideally backend handles this logic or we use headphones.
+
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({
+                type: 'transcript',
+                text: finalTranscript.trim()
+              }));
+            }
+          }
+        };
+
+        recognition.onerror = (event) => {
+          // 'aborted' is expected when we manually stop/restart - ignore it
+          if (event.error === 'aborted') {
+            return;
+          }
+
+          console.error('❌ Web Speech API error:', event.error);
+
+          // CRITICAL: Always try to restart for persistent listening
+          if (isCallActiveRef.current) {
+            const restartDelay = event.error === 'no-speech' ? 100 : 300;
+            setTimeout(() => {
+              if (isCallActiveRef.current && recognitionRef.current) {
+                // Don't restart if already started (handled by catch block in restartRecognition)
+                restartRecognition();
+              }
+            }, restartDelay);
+          }
+        };
+
+        recognition.onend = () => {
+          console.log('⚠️ Web Speech API ended');
+          // For persistent listening, ALWAYS restart if call is active
+          if (isCallActiveRef.current) {
+            console.log('🔄 Restarting Web Speech API (persistent listening)...');
+            setTimeout(() => {
+              if (isCallActiveRef.current && recognitionRef.current) {
+                restartRecognition();
+              }
+            }, 100);
+          }
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+
+        // Store stream reference for cleanup
+        mediaRecorderRef.current = { recognition, stream: null };
+        isCallActiveRef.current = true;
+        setIsCallActive(true);
+        console.log('✅ Call started with Web Speech API');
+        return;
       }
 
-      console.log('🎤 Starting Sarvam STT (Audio Mode)');
+      // Fallback to Deepgram (backend STT)
+      console.log('🎤 Using Deepgram (backend) for STT');
 
       // Request microphone access
       console.log('🎤 Requesting microphone access...');
@@ -672,141 +740,132 @@ function App() {
         audio: {
           channelCount: 1,
           sampleRate: 16000,
-          echoCancellation: true, // Use echo cancellation
+          echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
         },
       });
       console.log('✅ Microphone access granted');
+      console.log('📊 Audio tracks:', stream.getAudioTracks().length);
+      stream.getAudioTracks().forEach((track, index) => {
+        console.log(`📊 Track ${index} settings:`, track.getSettings());
+        console.log(`📊 Track ${index} enabled:`, track.enabled, 'readyState:', track.readyState);
+      });
 
       // Initialize AudioContext for processing
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
-          sampleRate: 16000,
-        });
-      }
-      const audioContext = audioContextRef.current;
-      console.log('✅ AudioContext ready, sample rate:', audioContext.sampleRate);
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: 16000,
+      });
+      audioContextRef.current = audioContext;
+      console.log('✅ AudioContext created, sample rate:', audioContext.sampleRate);
 
       const source = audioContext.createMediaStreamSource(stream);
       const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      console.log('✅ Audio processor created, buffer size:', processor.bufferSize);
 
-      // VAD State
-      let hasSpeech = false; // Has speech been detected in current phrase?
+      let audioChunkCount = 0;
+      let lastLogTime = Date.now();
 
       processor.onaudioprocess = (e) => {
-        // Don't process if call not active or agent is speaking (Barge-in handled separately?)
-        // Actually, for Barge-in we WANT to process even if agent is speaking.
-        if (!isCallActiveRef.current || !wsRef.current) return;
+        // Log first few callbacks to verify it's firing
+        if (audioChunkCount < 3) {
+          console.log(`🔊 Audio callback fired #${audioChunkCount + 1}`);
+        }
+
+        // Use ref instead of state to get current value
+        if (!isCallActiveRef.current) {
+          if (audioChunkCount === 0) {
+            console.log('⚠️ Call not active - isCallActiveRef:', isCallActiveRef.current);
+          }
+          return;
+        }
+
+        if (!wsRef.current) {
+          if (audioChunkCount === 0) {
+            console.log('⚠️ WebSocket not available');
+          }
+          return;
+        }
+
+        if (wsRef.current.readyState !== WebSocket.OPEN) {
+          if (audioChunkCount === 0) {
+            console.log('⚠️ WebSocket not open, state:', wsRef.current.readyState);
+          }
+          return;
+        }
 
         const inputData = e.inputBuffer.getChannelData(0);
 
-        // 1. Calculate RMS (Volume)
-        let sum = 0;
+        // Check if we have actual audio data
+        if (!inputData || inputData.length === 0) {
+          if (audioChunkCount === 0) {
+            console.warn('⚠️ No input data in audio buffer');
+          }
+          return;
+        }
+
+        // Log first chunk details
+        if (audioChunkCount === 0) {
+          console.log(`📊 First audio chunk - samples: ${inputData.length}, expected bytes: ${inputData.length * 2}`);
+        }
+
+        // Convert Float32Array to PCM 16-bit
+        const pcmData = new Int16Array(inputData.length);
         for (let i = 0; i < inputData.length; i++) {
-          sum += inputData[i] * inputData[i];
-        }
-        const rms = Math.sqrt(sum / inputData.length);
-
-        // 2. VAD Logic
-        const SILENCE_THRESHOLD = 0.02; // Threshold for speech
-        const SILENCE_DURATION = 1200; // 1.2 seconds of silence to trigger send
-
-        if (rms > SILENCE_THRESHOLD) {
-          // Speech currently happening
-          if (silenceStartRef.current !== null) {
-            // We were in silence, but speech resumed
-            // console.log('Speech resumed');
-          }
-          silenceStartRef.current = null;
-          hasSpeech = true;
-
-          // If we started speaking while agent is speaking, INTERRUPT!
-          if (isSpeakingRef.current && activeSourcesRef.current.length > 0) {
-            console.log('�️ User speaking (RMS ' + rms.toFixed(3) + ') - Triggering Barge-in');
-            stopAgentSpeech();
-            wsRef.current.send(JSON.stringify({ type: 'stop_generation' }));
-          }
-        } else {
-          // Silence currently happening
-          if (silenceStartRef.current === null) {
-            silenceStartRef.current = Date.now();
-          }
+          // Clamp and convert to 16-bit integer
+          const s = Math.max(-1, Math.min(1, inputData[i]));
+          pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
         }
 
-        // 3. Buffer Audio (Always buffer if we are "listening")
-        // NOTE: We clone the data because inputData is reused
-        bufferedAudioRef.current.push(new Float32Array(inputData));
+        // Send PCM audio to server
+        try {
+          // Use the buffer directly from Int16Array - it's already in the correct format
+          // Int16Array.buffer is an ArrayBuffer with the correct byte length
+          const buffer = pcmData.buffer;
 
-        // 4. Check for Send Condition
-        if (hasSpeech && silenceStartRef.current && (Date.now() - silenceStartRef.current > SILENCE_DURATION)) {
-          // Speech ENDED (Silence timeout reached)
+          // Verify buffer size (should be samples * 2 bytes)
+          const expectedSize = inputData.length * 2;
+          if (buffer.byteLength !== expectedSize) {
+            console.warn(`⚠️ Buffer size mismatch: expected ${expectedSize}, got ${buffer.byteLength}`);
+          }
 
-          // Process buffered audio
-          if (bufferedAudioRef.current.length > 0) {
-            const totalLength = bufferedAudioRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
+          // Always send if buffer has data (remove the 100 byte minimum check)
+          if (buffer.byteLength > 0) {
+            // Send the buffer directly
+            wsRef.current.send(buffer);
+            audioChunkCount++;
 
-            // Only send if duration > 0.5s to avoid clicks/noise
-            if (totalLength > 16000 * 0.5) {
-              console.log(`� VAD Trigger: Sending ${totalLength} samples to Sarvam...`);
-
-              // Flatten
-              const pcmData = new Float32Array(totalLength);
-              let offset = 0;
-              for (const chunk of bufferedAudioRef.current) {
-                pcmData.set(chunk, offset);
-                offset += chunk.length;
-              }
-
-              // Convert to WAV
-              const wavBuffer = convertPCMToWav(pcmData);
-
-              // Send!
-              wsRef.current.send(wavBuffer);
-              console.log('✅ Audio sent.');
-            } else {
-              console.log('⚠️ Audio too short, discarded.');
+            const now = Date.now();
+            if (audioChunkCount === 1 || audioChunkCount % 50 === 0 || (now - lastLogTime) > 2000) {
+              console.log(`📤 Sent ${audioChunkCount} audio chunks, size: ${buffer.byteLength} bytes, samples: ${inputData.length}`);
+              lastLogTime = now;
+            }
+          } else {
+            if (audioChunkCount === 0) {
+              console.warn(`⚠️ Skipping send - empty buffer (expected ~${expectedSize} bytes)`);
             }
           }
-
-          // Reset for next phrase
-          bufferedAudioRef.current = [];
-          silenceStartRef.current = null;
-          hasSpeech = false;
-        }
-
-        // Cap buffer size to avoid memory issues (e.g. 30 seconds max)
-        if (bufferedAudioRef.current.length > 200) { // ~30s at 4096 buffer/16k
-          // Check if we haven't detected speech yet, just clear noise
-          if (!hasSpeech) {
-            bufferedAudioRef.current = []; // Clear background noise buffer
-          }
+        } catch (error) {
+          console.error('❌ Error sending audio:', error);
+          console.error('Error details:', error.message);
+          console.error('Error stack:', error.stack);
         }
       };
 
       source.connect(processor);
-      processor.connect(audioContext.destination);
+      // Don't connect processor to destination to avoid feedback
+      // We only want to send audio to WebSocket, not play it back
 
-      // Store references for cleanup
-      mediaRecorderRef.current = {
-        stream,
-        source,
-        processor,
-        stop: () => {
-          stream.getTracks().forEach(track => track.stop());
-          source.disconnect();
-          processor.disconnect();
-        }
-      };
-
-      isCallActiveRef.current = true;
+      mediaRecorderRef.current = { stream, processor, source };
+      isCallActiveRef.current = true; // Set ref immediately
       setIsCallActive(true);
-      console.log('✅ Call started with custom Audio Processor');
+      setStatus('listening');
+      console.log('✅ Call started - audio processing active');
+      console.log('📊 Audio context sample rate:', audioContext.sampleRate);
+      console.log('📊 Processor buffer size:', processor.bufferSize);
     } catch (error) {
       console.error('Error starting call:', error);
       setError(error.message || 'Failed to start call. Please check microphone permissions.');
-      setIsCallActive(false);
-      isCallActiveRef.current = false;
     }
   };
 
