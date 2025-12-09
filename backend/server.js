@@ -38,7 +38,7 @@ console.log('✅ All required environment variables are set\n');
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import { streamChatCompletion } from './services/openai.js';
-import { streamSarvamTTS } from './services/sarvam.js';
+import { streamSarvamTTS, transcribeAudio } from './services/sarvam.js';
 import { ConversationState } from './services/conversationState.js';
 import { saveToGoogleSheets, updateFieldInGoogleSheets } from './services/googleSheets.js';
 
@@ -110,8 +110,26 @@ fastify.register(async function (fastify) {
         throw error;
       }
 
+      // Track processing state for cancellation (Barge-in)
+      const processingState = {
+        isGenerating: false,
+        shouldCancel: false
+      };
+
       // Process transcript: OpenAI -> Sarvam TTS -> Client
       async function processTranscript(transcript) {
+        // If we are already generating, cancel the previous generation first
+        if (processingState.isGenerating) {
+          console.log('🔄 New transcript received while generating - cancelling previous request...');
+          processingState.shouldCancel = true;
+          // Wait a tiny bit for the cancellation to propagate
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        // Reset state for new request
+        processingState.isGenerating = true;
+        processingState.shouldCancel = false;
+
         console.log('🔄 Processing transcript:', transcript);
         console.log('📊 Current messages count:', messages.length);
 
@@ -151,107 +169,149 @@ fastify.register(async function (fastify) {
           console.log('✅ conversationState validated successfully before streamChatCompletion');
 
           // Stream OpenAI response and collect sentences
-          const sentences = [];
+          // Latency Optimization: Process sentences AS SOON AS they are ready
+          const sentenceQueue = [];
+          let isOpenAIComplete = false;
+          let sentenceProcessingPromise = null;
 
-          messages = await streamChatCompletion(transcript, messages, conversationState, (token) => {
-            // Buffer tokens into sentences
-            currentSentenceBuffer += token;
+          // Consumer: Process sentences and stream TTS
+          const processSentenceQueue = async () => {
+            while (true) {
+              // Wait for a sentence or completion
+              if (sentenceQueue.length === 0) {
+                if (isOpenAIComplete) break;
+                // Wait a bit
+                await new Promise(resolve => setTimeout(resolve, 50));
+                continue;
+              }
 
-            // Check if we have a complete sentence
-            const sentenceEndRegex = /[.!?]+(\s+|$)/;
-            const match = currentSentenceBuffer.search(sentenceEndRegex);
+              // Get next sentence
+              const sentence = sentenceQueue.shift();
 
-            if (match !== -1) {
-              const endMatch = currentSentenceBuffer.substring(match).match(/^[.!?]+\s*/);
-              const sentenceEndIndex = match + (endMatch ? endMatch[0].length : 1);
+              // Check cancellation
+              if (processingState.shouldCancel) break;
 
-              const completeSentence = currentSentenceBuffer.substring(0, sentenceEndIndex).trim();
-              currentSentenceBuffer = currentSentenceBuffer.substring(sentenceEndIndex);
+              console.log('🎤 Step 2: Sending sentence to Sarvam TTS (Streaming):', sentence);
+              try {
+                await streamSarvamTTS(sentence, (audioChunk) => {
+                  if (processingState.shouldCancel) return;
 
-              if (completeSentence) {
-                sentences.push(completeSentence);
+                  if (socket && socket.readyState === 1) {
+                    if (Buffer.isBuffer(audioChunk)) {
+                      socket.send(audioChunk);
+                    } else if (audioChunk instanceof ArrayBuffer) {
+                      socket.send(audioChunk);
+                    } else if (audioChunk.buffer instanceof ArrayBuffer) {
+                      socket.send(audioChunk.buffer.slice(
+                        audioChunk.byteOffset,
+                        audioChunk.byteOffset + audioChunk.byteLength
+                      ));
+                    } else {
+                      socket.send(Buffer.from(audioChunk));
+                    }
+                  }
+                });
+              } catch (error) {
+                console.error('❌ Error streaming TTS:', error);
               }
             }
-          });
+          };
 
-          // Process sentences sequentially
-          for (const sentence of sentences) {
-            console.log('🎤 Step 2: Sending sentence to Sarvam TTS:', sentence);
-            try {
-              await streamSarvamTTS(sentence, (audioChunk) => {
-                // Send audio chunk directly to client
-                if (socket && socket.readyState === 1) {
-                  if (Buffer.isBuffer(audioChunk)) {
-                    socket.send(audioChunk);
-                  } else if (audioChunk instanceof ArrayBuffer) {
-                    socket.send(audioChunk);
-                  } else if (audioChunk.buffer instanceof ArrayBuffer) {
-                    socket.send(audioChunk.buffer.slice(
-                      audioChunk.byteOffset,
-                      audioChunk.byteOffset + audioChunk.byteLength
-                    ));
-                  } else {
-                    socket.send(Buffer.from(audioChunk));
-                  }
-                } else {
-                  console.warn('⚠️ Cannot send audio - WebSocket not open, state:', socket?.readyState);
+          // Start the consumer loop
+          sentenceProcessingPromise = processSentenceQueue();
+
+          // Check cancellation function
+          const checkCancellation = () => {
+            return processingState.shouldCancel;
+          };
+
+          messages = await streamChatCompletion(
+            transcript,
+            messages,
+            conversationState,
+            (token) => {
+              // Buffer tokens into sentences
+              currentSentenceBuffer += token;
+
+              // Check if we have a complete sentence
+              const sentenceEndRegex = /[.!?]+(\s+|$)/;
+              const match = currentSentenceBuffer.search(sentenceEndRegex);
+
+              if (match !== -1) {
+                const endMatch = currentSentenceBuffer.substring(match).match(/^[.!?]+\s*/);
+                const sentenceEndIndex = match + (endMatch ? endMatch[0].length : 1);
+
+                const completeSentence = currentSentenceBuffer.substring(0, sentenceEndIndex).trim();
+                currentSentenceBuffer = currentSentenceBuffer.substring(sentenceEndIndex);
+
+                if (completeSentence) {
+                  // Push to queue for immediate processing
+                  sentenceQueue.push(completeSentence);
                 }
-              });
-            } catch (error) {
-              console.error('❌ Error streaming TTS:', error);
-              console.error('TTS error details:', error.message, error.stack);
-            }
-          }
+              }
+            },
+            checkCancellation // Pass the cancellation checker
+          );
 
+          // OpenAI stream finished
           console.log('✅ OpenAI streaming completed. Updated messages count:', messages.length);
 
-          // Send any remaining buffer as final sentence
+          // Handle any remaining buffer
           if (currentSentenceBuffer.trim()) {
-            console.log('🎤 Step 2 (final): Sending remaining buffer to Sarvam TTS:', currentSentenceBuffer.trim());
-            try {
-              await streamSarvamTTS(currentSentenceBuffer.trim(), (audioChunk) => {
-                if (socket && socket.readyState === 1) {
-                  if (Buffer.isBuffer(audioChunk)) {
-                    socket.send(audioChunk);
-                  } else if (audioChunk instanceof ArrayBuffer) {
-                    socket.send(audioChunk);
-                  } else if (audioChunk.buffer instanceof ArrayBuffer) {
-                    socket.send(audioChunk.buffer.slice(
-                      audioChunk.byteOffset,
-                      audioChunk.byteOffset + audioChunk.byteLength
-                    ));
-                  } else {
-                    socket.send(Buffer.from(audioChunk));
-                  }
-                }
-              });
-            } catch (error) {
-              console.error('❌ Error streaming final TTS:', error);
-            }
+            sentenceQueue.push(currentSentenceBuffer.trim());
             currentSentenceBuffer = '';
           }
+
+          isOpenAIComplete = true; // Signal consumer to finish
+
+          // Wait for all TTS to finish
+          await sentenceProcessingPromise;
+
         } catch (error) {
           console.error('❌ Error processing transcript:', error);
-          console.error('Error details:', error.message);
-          console.error('Error stack:', error.stack);
           if (socket && socket.readyState === 1) {
             socket.send(JSON.stringify({ error: 'Failed to process transcript: ' + error.message }));
           }
+        } finally {
+          processingState.isGenerating = false;
         }
       }
 
       // Handle incoming messages from client
       socket.on('message', async (message) => {
-        // Check if message is text (transcript from Web Speech API)
-        if (typeof message === 'string' || message instanceof String || Buffer.isBuffer(message) && message.toString().startsWith('{')) {
+        // Check if message is binary (Buffer) for Sarvam Audio STT
+        if (Buffer.isBuffer(message)) {
+          console.log('🎤 Received audio buffer from client, size:', message.length);
           try {
-            const data = typeof message === 'string' ? JSON.parse(message) : JSON.parse(message.toString());
+            // Send to Sarvam STT
+            const start = Date.now();
+            console.log('📤 Transcribing with Sarvam STT...');
+            const text = await transcribeAudio(message);
+            const duration = Date.now() - start;
 
-            if (data.type === 'transcript' && data.text) {
-              console.log('📝 Received transcript from Web Speech API:', data.text);
-              processTranscript(data.text).catch((error) => {
-                console.error('Error in processTranscript:', error);
-              });
+            if (text && text.trim()) {
+              console.log(`✅ Sarvam STT result (${duration}ms):`, text);
+              // Process the transcript
+              await processTranscript(text);
+            } else {
+              console.log('⚠️ Sarvam STT returned empty text');
+            }
+          } catch (error) {
+            console.error('❌ Error processing audio with Sarvam STT:', error.message);
+            socket.send(JSON.stringify({ error: 'STT failed: ' + error.message }));
+          }
+          return;
+        }
+
+        // Check if message is text (legacy/control messages)
+        if (typeof message === 'string' || message instanceof String || (Buffer.isBuffer(message) && message.toString().startsWith('{'))) {
+          try {
+            const msgString = Buffer.isBuffer(message) ? message.toString() : message;
+            const data = JSON.parse(msgString);
+
+            if (data.type === 'stop_generation') {
+              console.log('🛑 Received stop_generation signal (Barge-in)');
+              processingState.shouldCancel = true;
               return;
             }
 

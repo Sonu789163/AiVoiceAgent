@@ -21,9 +21,10 @@ function getOpenAIClient() {
  * @param {Array} messages - Conversation history
  * @param {ConversationState} conversationState - Current conversation state with collected data
  * @param {Function} onToken - Callback for each token received
+ * @param {Function} [checkCancellation] - Optional callback that returns true if stream should be cancelled
  * @returns {Promise<Array>} Updated messages array with user and assistant messages
  */
-export async function streamChatCompletion(transcript, messages, conversationState, onToken) {
+export async function streamChatCompletion(transcript, messages, conversationState, onToken, checkCancellation) {
   // Add user message to history
   const userMessage = {
     role: 'user',
@@ -291,6 +292,14 @@ ${contextString}
 
     console.log('🔵 OpenAI: Stream created, reading chunks...');
     for await (const chunk of stream) {
+      // Check cancellation signal
+      if (checkCancellation && checkCancellation()) {
+        console.log('🛑 OpenAI: Stream cancelled by user request');
+        // If we can, destroy the stream (though for-await loop break is main mechanism)
+        if (stream.controller) stream.controller.abort();
+        break;
+      }
+
       const content = chunk.choices[0]?.delta?.content;
       if (content) {
         assistantResponse += content;
@@ -311,6 +320,10 @@ ${contextString}
       { role: 'assistant', content: assistantResponse },
     ];
   } catch (error) {
+    if (error.name === 'AbortError' || (checkCancellation && checkCancellation())) {
+      console.log('🛑 OpenAI: Request aborted');
+      return messages; // Return original messages if aborted
+    }
     console.error('OpenAI streaming error:', error);
     throw error;
   }
