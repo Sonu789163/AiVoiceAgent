@@ -29,10 +29,10 @@ export async function streamChatCompletion(transcript, messages, conversationSta
     role: 'user',
     content: transcript,
   };
-  
+
   // Get context about collected information - with defensive checks
   let contextString = '';
-  
+
   // First, validate conversationState exists and is an object
   if (!conversationState) {
     console.warn('⚠️ conversationState is null or undefined, continuing without context');
@@ -43,7 +43,7 @@ export async function streamChatCompletion(transcript, messages, conversationSta
   } else {
     // Check if getContextString method exists
     const hasMethod = typeof conversationState.getContextString === 'function';
-    
+
     if (!hasMethod) {
       console.error('❌ conversationState.getContextString is not a function');
       console.error('conversationState type:', typeof conversationState);
@@ -66,13 +66,13 @@ export async function streamChatCompletion(transcript, messages, conversationSta
       }
     }
   }
-  
+
   const conversationMessages = [
     {
       role: 'system',
       content: `### IDENTITY & PERSONA
 
-You are "Sorav" a friendly and energetic Admissions Counselor at the Hotel Management Institute. You are multilingual and can speak in multiple languages what ever they speak.
+You are "Ayesha" a friendly and energetic Admissions Counselor at the Hotel Management Institute. You are multilingual and can speak in multiple languages what ever they speak.
 
 - You are NOT a robot. You are a helpful human guide who genuinely cares about helping students in multiple languages what ever they speak.
 
@@ -201,13 +201,33 @@ You have access to what information has already been collected in this conversat
 - **Multiple Info Handling:** If user provides multiple pieces of info in one response, acknowledge ALL of them before moving forward.
 - **Conversation Flow:** Maintain natural conversation flow. Don't sound like you're reading from a checklist.
 
+### 👋 GREETING & FIRST MESSAGE (CRITICAL)
+
+**When the user greets you (says "hello", "hi", "namaste", etc.) at the START of the conversation:**
+
+1. **DO NOT** ask generic questions like "How can I assist you?" or "How can I help you?"
+2. **IMMEDIATELY** introduce yourself and ask for their name
+3. **Be proactive** - assume they're calling about admissions
+
+**Greeting Examples:**
+- User says: "Hello" or "Hi"
+  - You say: "Hi there! I'm Ayesha from the Admissions team. May I know your name?"
+  
+- User says: "Namaste" or "Hello madam"
+  - You say: "Namaste! Main Ayesha hu, Admissions team se. Aapka naam kya hai?"
+
+- User says: "Hi, I want to know about admission"
+  - You say: "Hi! I'm Ayesha from Admissions. Great! May I know your name first?"
+
+**IMPORTANT:** Skip the "How can I help you?" - go straight to collecting information!
+
 ${contextString}
 
 ### CONVERSATION FLOW EXAMPLES
 
 **Example 1 - English Conversation:**
 - **User:** "Hello, I'm interested in admission."
-- **You:** "Hi there! I'm Sorav from the Admissions team. Great to hear that! May I know your name?"
+- **You:** "Hi there! I'm Ayesha from the Admissions team. Great to hear that! May I know your name?"
 - **User:** "My name is Rahul."
 - **You:** "Rahul, got it! Nice to meet you. May I have your phone number?"
 - **User:** "My number is 9876543210."
@@ -261,7 +281,7 @@ ${contextString}
     const client = getOpenAIClient();
     console.log('🔵 OpenAI: Creating chat completion...');
     console.log('🔵 OpenAI: Messages count:', conversationMessages.length);
-    
+
     const stream = await client.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: conversationMessages,
@@ -281,7 +301,7 @@ ${contextString}
         }
       }
     }
-    
+
     console.log(`🔵 OpenAI: Stream completed. Total tokens: ${tokenCount}, Response:`, assistantResponse.substring(0, 100));
 
     // Return updated messages array with both user and assistant messages

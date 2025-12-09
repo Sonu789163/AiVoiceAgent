@@ -109,32 +109,55 @@ async function findOrCreateSessionRow(conversationState) {
       }
     }
 
-    // Session not found - create NEW row at the end
-    // Calculate next available row number (rows.length includes all rows including header)
-    const newRowNumber = rows.length + 1;
-    conversationState.sheetRowNumber = newRowNumber;
+    // Create new row by appending empty row (8 columns: Session, Student Name, Phone Number, Interest, Phone no., City, Education, Year)
+    const emptyRow = ['', '', '', '', '', '', '', '']; // 8 empty cells
+    const appendResponse = await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${SHEET_NAME}!A:H`, // Updated to include all 8 columns
+      valueInputOption: 'USER_ENTERED',
+      insertDataOption: 'INSERT_ROWS',
+      resource: {
+        values: [emptyRow],
+      },
+    });
 
-    console.log(`📝 Creating NEW row ${newRowNumber} for NEW session ${sessionId}`);
-    console.log(`📝 Total existing rows: ${rows.length}, new row will be: ${newRowNumber}`);
+    // Extract row number from the updated range
+    // Format: "Sheet1!A2:H2" -> row 2
+    const updatedRange = appendResponse.data.updates?.updatedRange;
+    if (updatedRange) {
+      const rowMatch = updatedRange.match(/(\d+)/);
+      if (rowMatch) {
+        const rowNumber = parseInt(rowMatch[1]);
+        conversationState.sheetRowNumber = rowNumber;
+        console.log(`📝 Created NEW row ${rowNumber} for NEW session ${sessionId}`);
+        console.log(`📝 Total rows in sheet before this: ${rows.length}`);
+        console.log(`📝 This is session #${rows.length} (excluding header)`);
 
-    // Immediately set the session ID in column A of the new row
-    try {
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A${newRowNumber}`,
-        valueInputOption: 'USER_ENTERED',
-        resource: {
-          values: [[sessionId]],
-        },
-      });
-      conversationState.sessionIdUpdated = true;
-      console.log(`✅ Created row ${newRowNumber} and set Session ID: ${sessionId}`);
-      return newRowNumber;
-    } catch (error) {
-      console.error('❌ Error setting session ID:', error);
-      // Still return the row number even if session ID update failed
-      return newRowNumber;
+        // Immediately set the session ID in column A
+        try {
+          await sheets.spreadsheets.values.update({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${SHEET_NAME}!A${rowNumber}`,
+            valueInputOption: 'USER_ENTERED',
+            resource: {
+              values: [[sessionId]],
+            },
+          });
+          conversationState.sessionIdUpdated = true;
+          console.log(`📝 Set Session ID in row ${rowNumber}`);
+        } catch (error) {
+          console.error('❌ Error setting session ID:', error);
+        }
+
+        return rowNumber;
+      }
     }
+
+    // Fallback: calculate row number from existing rows (ensure it's at least row 2)
+    const newRowNumber = Math.max(DATA_START_ROW, rows.length + 1);
+    conversationState.sheetRowNumber = newRowNumber;
+    console.log(`📝 Using row ${newRowNumber} for session ${sessionId}`);
+    return newRowNumber;
   } catch (error) {
     console.error('❌ Error finding/creating session row:', error);
     throw error;
