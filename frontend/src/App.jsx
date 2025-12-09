@@ -2,8 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 const WS_URL = (() => {
-  const url = import.meta.env.VITE_WS_URL;
-  // import.meta.env.VITE_WS_URL ;
+  const url = import.meta.env.VITE_WS_URL ;
   // Convert HTTP/HTTPS to WS/WSS for WebSocket connections
   if (url.startsWith('https://')) {
     return url.replace('https://', 'wss://');
@@ -270,10 +269,10 @@ function App() {
                     console.error('❌ Final retry failed:', e3.message);
                   }
                 }
-              }, 300);
+              }, 500);
             }
           }
-        }, 200);
+        }, 300);
       }
     }
   };
