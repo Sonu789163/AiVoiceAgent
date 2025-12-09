@@ -94,7 +94,8 @@ function App() {
 
     // More aggressive periodic check to ensure recognition is running
     const recognitionCheckInterval = setInterval(() => {
-      if (isCallActiveRef.current && recognitionRef.current && !isSpeakingRef.current) {
+      // Don't restart if speaking or playing audio (prevent echo)
+      if (isCallActiveRef.current && recognitionRef.current && !isSpeakingRef.current && !isPlayingRef.current) {
         // Try to restart recognition if it's not running
         try {
           recognitionRef.current.start();
@@ -452,8 +453,19 @@ function App() {
     isPlayingRef.current = true;
     setStatus('speaking');
 
-    // CRITICAL for Barge-in: DO NOT stop recognition here.
-    // We want to keep listening while the agent speaks.
+    // CRITICAL for Echo Cancellation: Stop recognition while speaking
+    // This prevents the agent from hearing itself on speakers
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+        console.log('🔇 Recognition paused for playback');
+
+        // Safety delay to ensure microphone is fully off before audio starts
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch (e) {
+        // Ignore errors
+      }
+    }
 
     try {
       // Audio context should already be initialized
@@ -547,7 +559,13 @@ function App() {
         } else {
           // No more chunks, update status
           // Note: Recognition is ALREADY running, so we don't need to restart it!
+          // No more chunks, update status
           setStatus(isCallActive ? 'listening' : 'idle');
+
+          // Restart recognition after speaking
+          if (isCallActive) {
+            restartRecognition();
+          }
         }
       }
     }
@@ -662,7 +680,8 @@ function App() {
         if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
 
         silenceTimerRef.current = setInterval(() => {
-          if (!isCallActiveRef.current || !recognitionRef.current) return;
+          // Don't process VAD if we are speaking/playing audio
+          if (!isCallActiveRef.current || !recognitionRef.current || isSpeakingRef.current || isPlayingRef.current) return;
 
           const now = Date.now();
           const timeSinceLastSpeech = now - lastSpeechTimeRef.current;
@@ -759,10 +778,11 @@ function App() {
           console.error('❌ Web Speech API error:', event.error);
 
           // CRITICAL: Always try to restart for persistent listening
-          if (isCallActiveRef.current) {
+          // BUT only if we are not currently speaking (to prevent echo)
+          if (isCallActiveRef.current && !isSpeakingRef.current && !isPlayingRef.current) {
             const restartDelay = event.error === 'no-speech' ? 50 : 200; // Even faster restart
             setTimeout(() => {
-              if (isCallActiveRef.current && recognitionRef.current) {
+              if (isCallActiveRef.current && recognitionRef.current && !isSpeakingRef.current && !isPlayingRef.current) {
                 // Don't restart if already started (handled by catch block in restartRecognition)
                 restartRecognition();
               }
@@ -773,13 +793,16 @@ function App() {
         recognition.onend = () => {
           console.log('⚠️ Web Speech API ended');
           // For persistent listening, ALWAYS restart if call is active
-          if (isCallActiveRef.current) {
+          // BUT ONLY RESTART IF NOT SPEAKING (to prevent self-listening/echo)
+          if (isCallActiveRef.current && !isSpeakingRef.current && !isPlayingRef.current) {
             console.log('🔄 Restarting Web Speech API (persistent listening)...');
             setTimeout(() => {
-              if (isCallActiveRef.current && recognitionRef.current) {
+              if (isCallActiveRef.current && recognitionRef.current && !isSpeakingRef.current && !isPlayingRef.current) {
                 restartRecognition();
               }
             }, 100);
+          } else {
+            console.log('⏸️ Web Speech API paused (Agent speaking or intentional stop)');
           }
         };
 
@@ -939,6 +962,9 @@ function App() {
     audioQueueRef.current = [];
     isPlayingRef.current = false;
     console.log('🛑 Call stopped - audio processing disabled');
+
+    // Stop all audio immediately
+    stopAgentSpeech();
 
     // Stop Web Speech API if active
     if (recognitionRef.current) {
