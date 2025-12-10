@@ -74,6 +74,27 @@ fastify.get('/test-sheets', async (request, reply) => {
   }
 });
 
+// API endpoint to get all student data from Google Sheets
+fastify.get('/api/students', async (request, reply) => {
+  try {
+    const { getStudentData } = await import('./services/googleSheets.js');
+    const students = await getStudentData();
+
+    // Set CORS headers
+    reply.header('Access-Control-Allow-Origin', '*');
+    reply.header('Access-Control-Allow-Methods', 'GET');
+
+    return students;
+  } catch (error) {
+    console.error('❌ Error fetching student data:', error);
+    reply.code(500);
+    return {
+      error: 'Failed to fetch student data',
+      message: error.message
+    };
+  }
+});
+
 // WebSocket connection route
 fastify.register(async function (fastify) {
   fastify.get('/connection', { websocket: true }, (connection, req) => {

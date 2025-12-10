@@ -371,3 +371,48 @@ export async function testGoogleSheetsConnection() {
   }
 }
 
+/**
+ * Get all student data from Google Sheets
+ * @returns {Promise<Array>} Array of student objects
+ */
+export async function getStudentData() {
+  try {
+    const sheets = await getSheetsClient();
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${SHEET_NAME}!A:H`, // All data columns
+    });
+
+    const rows = response.data.values || [];
+
+    if (rows.length === 0) {
+      console.log('📊 No student data found in Google Sheets');
+      return [];
+    }
+
+    // Skip header row (row 1) and convert data rows to objects
+    const data = rows.slice(1); // Skip header row
+
+    // Convert to array of objects
+    const students = data
+      .filter(row => row && row.length > 0 && row[0]) // Filter out empty rows and rows without session ID
+      .map(row => ({
+        sessionId: row[0] || '',
+        name: row[1] || '',
+        phoneNumber: row[2] || '',
+        programInterest: row[3] || '',
+        city: row[4] || '',
+        priorEducation: row[5] || '',
+        intakeYear: row[6] || '',
+        budget: row[7] || '',
+      }));
+
+    console.log(`📊 Retrieved ${students.length} student records from Google Sheets`);
+    return students;
+  } catch (error) {
+    console.error('❌ Error getting student data from Google Sheets:', error);
+    throw error;
+  }
+}
+
