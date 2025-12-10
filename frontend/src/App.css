@@ -1,14 +1,18 @@
 .app {
   width: 100%;
+  min-height: 100vh;
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 2rem;
 }
 
 .container {
+
+  border: 1px solid #ccc;
+  border-radius: 1rem;
   background: white;
-  border-radius: 24px;
   padding: 40px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   width: 100%;
@@ -21,6 +25,7 @@
     opacity: 0;
     transform: translateY(20px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -30,6 +35,10 @@
 .header {
   text-align: center;
   margin-bottom: 32px;
+  background: white;
+  padding: 10px;
+  border-radius: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .header h1 {
@@ -46,10 +55,11 @@
 
 .status-card {
   background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  border-radius: 16px;
-  padding: 24px;
+  border-radius: 20px;
+  padding: 20px;
   margin-bottom: 24px;
   text-align: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .status-indicator {
@@ -120,6 +130,7 @@
     transform: scale(1);
     opacity: 1;
   }
+
   100% {
     transform: scale(1.5);
     opacity: 0;
@@ -219,12 +230,13 @@
 }
 
 .info {
-  background: #f8f9fa;
+  background: white;
   border-radius: 12px;
   padding: 20px;
   font-size: 14px;
   color: #555;
   line-height: 1.6;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .info p {
@@ -265,6 +277,3 @@
     padding: 14px 24px;
   }
 }
-
-
-

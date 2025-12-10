@@ -13,7 +13,7 @@ const WS_URL = (() => {
   return url; // Already ws:// or wss://
 })();
 
-function App() {
+function App({ onCallStatusChange }) {
   const [isConnected, setIsConnected] = useState(false);
   const [isCallActive, setIsCallActive] = useState(false);
   const [status, setStatus] = useState('idle'); // idle, listening, processing, speaking
@@ -36,6 +36,13 @@ function App() {
   const silenceTimerRef = useRef(null); // Timer for Turbo VAD
   const lastSpeechTimeRef = useRef(0); // Timestamp of last interim speech
   const interimTranscriptRef = useRef(''); // Buffer for interim transcript
+
+  // Notify parent component when call status changes
+  useEffect(() => {
+    if (onCallStatusChange) {
+      onCallStatusChange(isCallActive);
+    }
+  }, [isCallActive, onCallStatusChange]);
 
   useEffect(() => {
     return () => {
