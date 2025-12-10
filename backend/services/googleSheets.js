@@ -11,7 +11,7 @@ const SPREADSHEET_ID = '15KSNdceVyEIv8O8F6Za93oi_SLtA-V2S83ARzAbFZQg';
 const SHEET_NAME = 'Sheet1'; // Default sheet name
 const HEADER_ROW = 1; // Header row number
 const DATA_START_ROW = 2; // Data starts from row 2 (after headers)
-const RANGE = 'A:H'; // Columns A to H (Session, Student Name, Phone Number, Interest subject, Phone no., City, Education, Intake Year)
+const RANGE = 'A:H'; // Columns A to H (Session, Name, Phone, Interest, City, Education, Intake, Budget)
 
 /**
  * Initialize Google Sheets API client
@@ -162,10 +162,10 @@ export async function updateFieldInGoogleSheets(conversationState, fieldName, va
       'name': 'B',             // Stu. Name (Column B)
       'phoneNumber': 'C',      // Phone Number (Column C)
       'programInterest': 'D',  // Course (Column D)
-      'city': 'F',             // City (Column F)
-      'priorEducation': 'G',   // Education (Column G)
-      'intakeYear': 'H',       // Intake Year (Column H)
-      'budget': 'I',           // Budget (Column I) - adding new column
+      'city': 'E',             // City (Column F)
+      'priorEducation': 'F',   // Education (Column G)
+      'intakeYear': 'G',       // Intake Year (Column H)
+      'budget': 'H',           // Budget (Column I) - adding new column
       // Note: Column E (Phone no.) is duplicate of C, we'll update both
     };
 
@@ -195,20 +195,7 @@ export async function updateFieldInGoogleSheets(conversationState, fieldName, va
       console.log(`📝 Updated Session ID in ${sessionCellRange}`);
     }
 
-    // If updating phone number, also update column E (Phone no.)
-    if (fieldName === 'phoneNumber' && column === 'C') {
-      const phoneNoCellRange = `${SHEET_NAME}!E${rowNumber}`;
-      const sheets = await getSheetsClient();
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: phoneNoCellRange,
-        valueInputOption: 'USER_ENTERED',
-        resource: {
-          values: [[value]],
-        },
-      });
-      console.log(`📝 Also updated Phone no. in ${phoneNoCellRange}`);
-    }
+
 
     const cellRange = `${SHEET_NAME}!${column}${rowNumber}`;
 
@@ -288,6 +275,7 @@ export async function saveToGoogleSheets(conversationState) {
         { name: 'city', value: collectedData.city },
         { name: 'priorEducation', value: collectedData.priorEducation },
         { name: 'intakeYear', value: collectedData.intakeYear },
+        { name: 'budget', value: collectedData.budget },
       ];
 
       for (const field of fields) {
@@ -312,16 +300,15 @@ export async function saveToGoogleSheets(conversationState) {
       collectedData.name || '',              // Column B: Stu. Name
       collectedData.phoneNumber || '',       // Column C: Phone Number
       collectedData.programInterest || '',   // Column D: Course
-      collectedData.phoneNumber || '',       // Column E: Phone no. (duplicate of C)
-      collectedData.city || '',              // Column F: City
-      collectedData.priorEducation || '',    // Column G: Education
-      collectedData.intakeYear || '',        // Column H: Intake Year
-      collectedData.budget || '',            // Column I: Budget
+      collectedData.city || '',              // Column E: City
+      collectedData.priorEducation || '',    // Column F: Education
+      collectedData.intakeYear || '',        // Column G: Intake Year
+      collectedData.budget || '',            // Column H: Budget
     ];
 
     // Update the entire row
     const sheets = await getSheetsClient();
-    const range = `${SHEET_NAME}!A${rowNumber}:I${rowNumber}`;
+    const range = `${SHEET_NAME}!A${rowNumber}:H${rowNumber}`;
 
     const response = await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,

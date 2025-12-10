@@ -25,9 +25,9 @@ export async function streamSarvamTTS(text, onAudioChunk, options = {}) {
         // Sarvam AI TTS API configuration
         const config = {
             target_language_code: options.language || 'hi-IN', // Default to Hindi
-            speaker: options.speaker || 'anushka', // Default speaker
-            pitch: options.pitch !== undefined ? options.pitch : 0,
-            pace: options.pace !== undefined ? options.pace : 1,
+            speaker: options.speaker || 'vidya', // Default speaker
+            pitch: options.pitch !== undefined ? options.pitch : 0.2,
+            pace: options.pace !== undefined ? options.pace : 1.2,
             loudness: options.loudness !== undefined ? options.loudness : 1,
             speech_sample_rate: options.sampleRate || 16000, // 16kHz for WebSocket compatibility
             enable_preprocessing: options.enablePreprocessing !== undefined ? options.enablePreprocessing : true,

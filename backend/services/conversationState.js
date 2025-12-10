@@ -38,7 +38,7 @@ export class ConversationState {
   async updateFieldAndSave(fieldName, value) {
     const oldValue = this.collectedData[fieldName];
     this.collectedData[fieldName] = value;
-    
+
     // If value changed and we have a callback, update Google Sheets
     if (value && value !== oldValue && this.updateSheetsCallback) {
       try {
@@ -57,14 +57,14 @@ export class ConversationState {
    */
   updateFromMessage(userMessage, assistantResponse = '') {
     const message = userMessage.toLowerCase();
-    
+
     // Extract name (patterns: "my name is", "i'm", "i am", "call me", "name is")
     if (!this.collectedData.name) {
       const namePatterns = [
         /(?:my name is|i'?m|i am|call me|name is|this is)\s+([a-z]+(?:\s+[a-z]+)?)/i,
         /^([a-z]+(?:\s+[a-z]+)?)(?:\s+here|\s+speaking)/i,
       ];
-      
+
       for (const pattern of namePatterns) {
         const match = message.match(pattern);
         if (match && match[1]) {
@@ -75,7 +75,7 @@ export class ConversationState {
             console.log('📝 Extracted name:', name);
             // Update Google Sheets immediately
             if (this.updateSheetsCallback) {
-              this.updateSheetsCallback('name', name).catch(err => 
+              this.updateSheetsCallback('name', name).catch(err =>
                 console.error('❌ Error updating name in sheets:', err)
               );
             }
@@ -89,7 +89,7 @@ export class ConversationState {
     if (!this.collectedData.phoneNumber) {
       // Remove spaces and dashes for easier matching
       const cleanMessage = message.replace(/[\s-]/g, '');
-      
+
       // Try to extract 10-digit numbers (most common)
       let phoneMatch = cleanMessage.match(/([6-9]\d{9})/);
       if (phoneMatch && phoneMatch[1]) {
@@ -119,7 +119,7 @@ export class ConversationState {
               console.log('📝 Extracted phone number:', phone);
               // Update Google Sheets immediately
               if (this.updateSheetsCallback) {
-                this.updateSheetsCallback('phoneNumber', phone).catch(err => 
+                this.updateSheetsCallback('phoneNumber', phone).catch(err =>
                   console.error('❌ Error updating phone in sheets:', err)
                 );
               }
@@ -127,7 +127,7 @@ export class ConversationState {
           }
         }
       }
-      
+
       // Also try patterns with context words
       if (!this.collectedData.phoneNumber) {
         const contextPatterns = [
@@ -135,7 +135,7 @@ export class ConversationState {
           /number.*?(\d{9,10})/i,
           /mobile.*?(\d{9,10})/i,
         ];
-        
+
         for (const pattern of contextPatterns) {
           const match = message.match(pattern);
           if (match && match[1]) {
@@ -146,7 +146,7 @@ export class ConversationState {
               console.log('📝 Extracted phone number:', this.collectedData.phoneNumber);
               // Update Google Sheets immediately
               if (this.updateSheetsCallback) {
-                this.updateSheetsCallback('phoneNumber', this.collectedData.phoneNumber).catch(err => 
+                this.updateSheetsCallback('phoneNumber', this.collectedData.phoneNumber).catch(err =>
                   console.error('❌ Error updating phone in sheets:', err)
                 );
               }
@@ -166,7 +166,7 @@ export class ConversationState {
         'food and beverage': ['food and beverage', 'food beverage', 'food & beverage', 'f&b', 'restaurant', 'f and b'],
         'hospitality': ['hospitality', 'hotel management', 'hotel'],
       };
-      
+
       // Check for exact matches first (longer phrases)
       for (const [interest, keywords] of Object.entries(interestKeywords)) {
         // Sort keywords by length (longest first) to match longer phrases first
@@ -177,7 +177,7 @@ export class ConversationState {
             console.log('📝 Extracted program interest:', interest, 'from keyword:', keyword);
             // Update Google Sheets immediately
             if (this.updateSheetsCallback) {
-              this.updateSheetsCallback('programInterest', interest).catch(err => 
+              this.updateSheetsCallback('programInterest', interest).catch(err =>
                 console.error('❌ Error updating interest in sheets:', err)
               );
             }
@@ -195,7 +195,7 @@ export class ConversationState {
         console.log('📝 Extracted prior education: 12th');
         // Update Google Sheets immediately
         if (this.updateSheetsCallback) {
-          this.updateSheetsCallback('priorEducation', '12th').catch(err => 
+          this.updateSheetsCallback('priorEducation', '12th').catch(err =>
             console.error('❌ Error updating education in sheets:', err)
           );
         }
@@ -204,7 +204,7 @@ export class ConversationState {
         console.log('📝 Extracted prior education: Graduate');
         // Update Google Sheets immediately
         if (this.updateSheetsCallback) {
-          this.updateSheetsCallback('priorEducation', 'Graduate').catch(err => 
+          this.updateSheetsCallback('priorEducation', 'Graduate').catch(err =>
             console.error('❌ Error updating education in sheets:', err)
           );
         }
@@ -222,7 +222,7 @@ export class ConversationState {
           console.log('📝 Extracted intake year:', yearMatch[1]);
           // Update Google Sheets immediately
           if (this.updateSheetsCallback) {
-            this.updateSheetsCallback('intakeYear', yearMatch[1]).catch(err => 
+            this.updateSheetsCallback('intakeYear', yearMatch[1]).catch(err =>
               console.error('❌ Error updating year in sheets:', err)
             );
           }
@@ -233,7 +233,7 @@ export class ConversationState {
         console.log('📝 Extracted intake year: Next year');
         // Update Google Sheets immediately
         if (this.updateSheetsCallback) {
-          this.updateSheetsCallback('intakeYear', this.collectedData.intakeYear).catch(err => 
+          this.updateSheetsCallback('intakeYear', this.collectedData.intakeYear).catch(err =>
             console.error('❌ Error updating year in sheets:', err)
           );
         }
@@ -242,56 +242,116 @@ export class ConversationState {
 
     // Extract city
     if (!this.collectedData.city) {
-      // Common Indian cities
+      // Extensive list of Indian cities (Tier 1, 2, 3)
       const cities = [
-        'mumbai', 'delhi', 'bangalore', 'hyderabad', 'chennai', 'kolkata',
-        'pune', 'ahmedabad', 'jaipur', 'lucknow', 'kanpur', 'nagpur',
-        'indore', 'thane', 'bhopal', 'visakhapatnam', 'patna', 'vadodara',
-        'ghaziabad', 'ludhiana', 'agra', 'nashik', 'faridabad', 'meerut',
-        'rajkot', 'varanasi', 'srinagar', 'amritsar', 'jodhpur', 'raipur'
+        // Tier 1
+        'mumbai', 'delhi', 'bangalore', 'bengaluru', 'hyderabad', 'chennai', 'kolkata', 'pune', 'ahmedabad',
+        // Tier 2/3 & others
+        'jaipur', 'lucknow', 'kanpur', 'nagpur', 'indore', 'thane', 'bhopal', 'visakhapatnam', 'patna', 'vadodara',
+        'ghaziabad', 'ludhiana', 'agra', 'nashik', 'faridabad', 'meerut', 'rajkot', 'varanasi', 'srinagar', 'amritsar',
+        'jodhpur', 'raipur', 'coimbatore', 'kochi', 'cochin', 'thiruvananthapuram', 'trivandrum', 'madurai', 'jamshedpur',
+        'ranchi', 'guwahati', 'bhubaneswar', 'cuttack', 'dehradun', 'mysore', 'mysuru', 'shimla', 'gurgaon', 'gurugram',
+        'noida', 'chandigarh', 'surat', 'aurangabad', 'navi mumbai', 'allahabad', 'prayagraj', 'howrah', 'jabalpur',
+        'gwalior', 'vijayawada', 'jalandhar', 'kota', 'udaipur', 'ajmer', 'bikaner', 'akola', 'latur', 'dhule',
+        'ahmednagar', 'chandrapur', 'parbhani', 'jalgaon', 'jalna', 'nanded', 'solapur', 'kolhapur', 'sangli',
+        'satara', 'ratnagiri', 'sindhudurg', 'panjim', 'panaji', 'margao', 'vasco', 'siliguri', 'durgapur', 'asansol',
+        'kharagpur', 'haldia', 'dhanbad', 'bokaro', 'hazaribagh', 'giridih', 'ramgarh', 'phagwara', 'hoshiarpur',
+        'pathankot', 'mohali', 'panchkula', 'rohtak', 'hisar', 'karnal', 'panipat', 'sonipat', 'ambala', 'yamunanagar',
+        'kurukshetra', 'kaithal', 'sirsa', 'fatehabad', 'jind', 'bhiwani', 'charkhi dadri', 'mahendragarh', 'rewari',
+        'jhajjar', 'nu'
       ];
-      
+
+      // Check for exact matches
       for (const city of cities) {
-        if (message.includes(city)) {
+        // Use word boundary to avoid partial matches (e.g. "goa" in "goal")
+        const regex = new RegExp(`\\b${city}\\b`, 'i');
+        if (regex.test(message)) {
           this.collectedData.city = city.charAt(0).toUpperCase() + city.slice(1);
           console.log('📝 Extracted city:', this.collectedData.city);
           // Update Google Sheets immediately
           if (this.updateSheetsCallback) {
-            this.updateSheetsCallback('city', this.collectedData.city).catch(err => 
+            this.updateSheetsCallback('city', this.collectedData.city).catch(err =>
               console.error('❌ Error updating city in sheets:', err)
             );
           }
           break;
         }
       }
+
+      // Context-based extraction for cities not in list
+      if (!this.collectedData.city) {
+        const cityPatterns = [
+          /(?:i am from|i'm from|i live in|my city is|location is)\s+([a-z]+)/i,
+        ];
+
+        for (const pattern of cityPatterns) {
+          const match = message.match(pattern);
+          if (match && match[1]) {
+            const potentialCity = match[1].trim();
+            // Basic validation to avoid common words
+            if (potentialCity.length > 3 && !['here', 'there', 'home', 'india'].includes(potentialCity.toLowerCase())) {
+              this.collectedData.city = potentialCity.charAt(0).toUpperCase() + potentialCity.slice(1);
+              console.log('📝 Extracted city (context):', this.collectedData.city);
+              if (this.updateSheetsCallback) {
+                this.updateSheetsCallback('city', this.collectedData.city).catch(err =>
+                  console.error('❌ Error updating city in sheets:', err)
+                );
+              }
+              break;
+            }
+          }
+        }
+      }
     }
 
     // Extract budget
     if (!this.collectedData.budget) {
-      // Patterns: "5 lakhs", "5 lacs", "500000", "5L", etc.
+      // Helper to convert word numbers to digits
+      const wordToNum = (str) => {
+        const words = {
+          'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+          'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+          'eleven': 11, 'twelve': 12, 'fifteen': 15, 'twenty': 20,
+          'thirty': 30, 'forty': 40, 'fifty': 50
+        };
+        return words[str.toLowerCase()] || str;
+      };
+
+      // Patterns: "5 lakhs", "five lakhs", "5.5 lakhs", etc.
       const budgetPatterns = [
-        /(\d+)\s*(?:lakh|lac|L)\b/i,
-        /(\d{4,})\s*(?:rupees?|rs|inr)?/i,
-        /budget.*?(\d+)\s*(?:lakh|lac|L)?/i,
+        /((?:\d+(?:\.\d+)?)|(?:one|two|three|four|five|six|seven|eight|nine|ten))\s*(?:lakh|lac|L)\b/i,
+        /budget.*?((?:\d+(?:\.\d+)?)|(?:one|two|three|four|five|six|seven|eight|nine|ten))/i,
       ];
-      
+
       for (const pattern of budgetPatterns) {
         const match = message.match(pattern);
         if (match && match[1]) {
-          let budget = match[1];
-          // Convert lakhs to number if needed
-          if (message.match(/lakh|lac|L/i)) {
-            budget = String(parseInt(budget) * 100000);
+          let valueStr = match[1];
+          let multiplier = 100000; // Default to lakhs context
+
+          // Convert word to number if possible
+          let value = parseFloat(wordToNum(valueStr));
+
+          if (!isNaN(value)) {
+            // If value is small (< 100) and followed by "lakh", multiply
+            // If value is large (> 1000), treat as absolute rupees
+            if (message.match(/lakh|lac|L/i)) {
+              value = value * 100000;
+            } else if (value < 100) {
+              // If user just says "5" in response to budget question, assume lakhs
+              value = value * 100000;
+            }
+
+            this.collectedData.budget = String(Math.floor(value));
+            console.log('📝 Extracted budget:', this.collectedData.budget);
+            // Update Google Sheets immediately
+            if (this.updateSheetsCallback) {
+              this.updateSheetsCallback('budget', this.collectedData.budget).catch(err =>
+                console.error('❌ Error updating budget in sheets:', err)
+              );
+            }
+            break;
           }
-          this.collectedData.budget = budget;
-          console.log('📝 Extracted budget:', budget);
-          // Update Google Sheets immediately
-          if (this.updateSheetsCallback) {
-            this.updateSheetsCallback('budget', budget).catch(err => 
-              console.error('❌ Error updating budget in sheets:', err)
-            );
-          }
-          break;
         }
       }
     }
@@ -348,11 +408,11 @@ export class ConversationState {
     }
 
     let context = '';
-    
+
     if (collected.length > 0) {
       context += `\n\n### 📋 COLLECTED INFORMATION SO FAR:\n${collected.join('\n')}\n`;
     }
-    
+
     if (missing.length > 0) {
       context += `\n### 🎯 STILL NEED TO COLLECT:\n${missing.join(', ')}\n`;
       context += `\n**NEXT QUESTION:** Ask about: ${missing[0]}\n`;
