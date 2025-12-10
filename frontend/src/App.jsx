@@ -404,9 +404,25 @@ function App() {
       audioQueueRef.current.push(chunk.buffer);
     }
 
-    // Start playing immediately if we have data
-    if (!isPlayingRef.current && audioQueueRef.current.length >= 1) {
+    // Start playing if we have enough chunks (Jitter Buffer)
+    // Wait for 3 chunks or if we have a lot of data to ensure smooth playback
+    // This adds a small initial latency but prevents "nervous" stuttering
+    const MIN_CHUNKS_TO_START = 3;
+    if (!isPlayingRef.current && audioQueueRef.current.length >= MIN_CHUNKS_TO_START) {
+      console.log('▶️ Jitter buffer full, starting playback');
       playAudioQueue();
+    } else if (!isPlayingRef.current && audioQueueRef.current.length > 0) {
+      // Safety timeout: if we don't get 3 chunks within 500ms, start anyway
+      // This prevents hanging if the response is very short (shorter than 3 chunks)
+      if (!audioContextRef.current.bufferTimeout) {
+        audioContextRef.current.bufferTimeout = setTimeout(() => {
+          if (!isPlayingRef.current && audioQueueRef.current.length > 0) {
+            console.log('▶️ Jitter buffer timeout, starting playback early');
+            playAudioQueue();
+          }
+          audioContextRef.current.bufferTimeout = null;
+        }, 500);
+      }
     }
   };
 
@@ -512,9 +528,9 @@ function App() {
         // If we fell behind real-time (underrun), jump to current time + small buffer
         let startTime = Math.max(audioContext.currentTime, audioContextRef.current.nextStartTime);
 
-        // If we're resetting (gap > 0.1s), add a tiny delay to allow scheduler to catch up
+        // If we're resetting (gap > 0.1s), add a larger delay to allow network to catch up
         if (startTime === audioContext.currentTime) {
-          startTime += 0.01; // 10ms safety buffer
+          startTime += 0.05; // 50ms safety buffer (Jitter tolerance)
         }
 
         source.start(startTime);
