@@ -18,39 +18,53 @@ const RANGE = 'A:H'; // Columns A to H (Session, Name, Phone, Interest, City, Ed
  */
 async function getSheetsClient() {
   try {
-    // Path to service account credentials
-    // Try multiple possible paths
-    const possiblePaths = [
-      process.env.GOOGLE_SERVICE_ACCOUNT_PATH,
-      '/Users/excollodev/Downloads/resolute-tracer-469504-r8-a1b7b9ac074a.json', // Absolute path
-      join(__dirname, '../../Downloads/resolute-tracer-469504-r8-a1b7b9ac074a.json'),
-      join(process.cwd(), 'resolute-tracer-469504-r8-a1b7b9ac074a.json'),
-      join(process.cwd(), 'backend/resolute-tracer-469504-r8-a1b7b9ac074a.json'),
-    ];
-
-    let credentialsPath = null;
     let credentials = null;
 
-    // Try to find the credentials file
-    for (const path of possiblePaths) {
-      if (!path) continue;
+    // OPTION 1: Try to get credentials from environment variable (for Render/production)
+    // This is the RECOMMENDED way for deployment
+    if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
       try {
-        const fullPath = path.startsWith('/') ? path : join(process.cwd(), path);
-        credentials = JSON.parse(readFileSync(fullPath, 'utf8'));
-        credentialsPath = fullPath;
-        console.log('✅ Found Google credentials at:', fullPath);
-        break;
+        credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+        console.log('✅ Using Google credentials from environment variable (GOOGLE_SERVICE_ACCOUNT_JSON)');
       } catch (e) {
-        // File not found, try next path
-        if (e.code !== 'ENOENT') {
-          console.warn('⚠️ Error reading credentials file:', path, e.message);
+        console.error('❌ Error parsing GOOGLE_SERVICE_ACCOUNT_JSON:', e.message);
+      }
+    }
+
+    // OPTION 2: Try to read from file (for local development)
+    if (!credentials) {
+      const possiblePaths = [
+        process.env.GOOGLE_SERVICE_ACCOUNT_PATH,
+        '/Users/excollodev/Downloads/resolute-tracer-469504-r8-a1b7b9ac074a.json', // Absolute path
+        join(__dirname, '../../Downloads/resolute-tracer-469504-r8-a1b7b9ac074a.json'),
+        join(process.cwd(), 'resolute-tracer-469504-r8-a1b7b9ac074a.json'),
+        join(process.cwd(), 'backend/resolute-tracer-469504-r8-a1b7b9ac074a.json'),
+      ];
+
+      // Try to find the credentials file
+      for (const path of possiblePaths) {
+        if (!path) continue;
+        try {
+          const fullPath = path.startsWith('/') ? path : join(process.cwd(), path);
+          credentials = JSON.parse(readFileSync(fullPath, 'utf8'));
+          console.log('✅ Found Google credentials at:', fullPath);
+          break;
+        } catch (e) {
+          // File not found, try next path
+          if (e.code !== 'ENOENT') {
+            console.warn('⚠️ Error reading credentials file:', path, e.message);
+          }
+          continue;
         }
-        continue;
       }
     }
 
     if (!credentials) {
-      throw new Error('Google service account credentials file not found. Please set GOOGLE_SERVICE_ACCOUNT_PATH or place the JSON file in the expected location.');
+      throw new Error(
+        'Google service account credentials not found. ' +
+        'Please set GOOGLE_SERVICE_ACCOUNT_JSON environment variable (for Render) ' +
+        'or GOOGLE_SERVICE_ACCOUNT_PATH to point to your JSON file (for local development).'
+      );
     }
 
     // Create auth client
@@ -62,6 +76,7 @@ async function getSheetsClient() {
     const authClient = await auth.getClient();
     const sheets = google.sheets({ version: 'v4', auth: authClient });
 
+    console.log('✅ Google Sheets client initialized successfully');
     return sheets;
   } catch (error) {
     console.error('❌ Error initializing Google Sheets client:', error);
