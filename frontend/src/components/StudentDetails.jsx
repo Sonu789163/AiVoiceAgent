@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import '../StudentDetails.css';
 
-const API_URL = import.meta.env.VITE_API_URL ;
+const API_URL = import.meta.env.VITE_API_URL;
 
 export default function StudentDetails() {
     const [students, setStudents] = useState([]);
@@ -102,18 +102,19 @@ export default function StudentDetails() {
                             <th>Education</th>
                             <th>Intake Year</th>
                             <th>Budget</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
                     <tbody className="table-body">
                         {filteredStudents.length === 0 ? (
                             <tr>
-                                <td colSpan="8" className="no-data">
+                                <td colSpan="9" className="no-data">
                                     {searchTerm ? 'No students found matching your search' : 'No student data available yet'}
                                 </td>
                             </tr>
                         ) : (
                             filteredStudents.map((student, index) => (
-                                <tr key={student.sessionId || index}>
+                                <tr key={student.sessionId || index} className={student.status === 'Confirmed' ? 'row-confirmed' : ''}>
                                     <td className="session-id">{student.sessionId || '-'}</td>
                                     <td className="student-name">{student.name || '-'}</td>
                                     <td>{student.phoneNumber || '-'}</td>
@@ -122,6 +123,11 @@ export default function StudentDetails() {
                                     <td>{student.priorEducation || '-'}</td>
                                     <td>{student.intakeYear || '-'}</td>
                                     <td>{student.budget || '-'}</td>
+                                    <td>
+                                        <span className={`status-badge ${student.status === 'Confirmed' ? 'status-confirmed' : 'status-partial'}`}>
+                                            {student.status || 'Partial'}
+                                        </span>
+                                    </td>
                                 </tr>
                             ))
                         )}
