@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 const WS_URL = (() => {
-  const url = import.meta.env.VITE_WS_URL;
+  const url =  import.meta.env.VITE_WS_URL;
   // import.meta.env.VITE_WS_URL ;
   // Convert HTTP/HTTPS to WS/WSS for WebSocket connections
   if (url.startsWith('https://')) {
@@ -156,6 +156,14 @@ function App({ onCallStatusChange }) {
               console.log('📝 Received TTS text (fallback to Web Speech API):', data.text);
               // Use Web Speech API for TTS (free, browser-based)
               speakText(data.text);
+            } else if (data.type === 'end_call') {
+              console.log('📞 Received end_call signal from backend - ending call automatically');
+              // Automatically end the call after confirmation
+              setTimeout(() => {
+                stopCall();
+              }, 500); // Small delay to ensure final message is heard
+            } else if (data.type === 'ai_response') {
+              console.log('🤖 AI RESPONSE:', data.text);
             } else if (data.error) {
               setError(data.error);
             }
@@ -793,37 +801,38 @@ function App({ onCallStatusChange }) {
         };
 
         recognition.onerror = (event) => {
-          // 'aborted' is expected when we Turbo VAD abort or manually stop - ignore it
+          // 'aborted' is expected when we stop. 'no-speech' is expected during silence.
           if (event.error === 'aborted') {
+            return;
+          }
+
+          if (event.error === 'no-speech') {
+            // Silence is normal; restart INSTANTLY (0ms) to minimize gap
+            if (isCallActiveRef.current && !isSpeakingRef.current && !isPlayingRef.current) {
+              restartRecognition();
+            }
             return;
           }
 
           console.error('❌ Web Speech API error:', event.error);
 
-          // CRITICAL: Always try to restart for persistent listening
-          // BUT only if we are not currently speaking (to prevent echo)
+          // For actual errors, wait slightly to avoid rapid loops
           if (isCallActiveRef.current && !isSpeakingRef.current && !isPlayingRef.current) {
-            const restartDelay = event.error === 'no-speech' ? 50 : 200; // Even faster restart
-            setTimeout(() => {
-              if (isCallActiveRef.current && recognitionRef.current && !isSpeakingRef.current && !isPlayingRef.current) {
-                // Don't restart if already started (handled by catch block in restartRecognition)
-                restartRecognition();
-              }
-            }, restartDelay);
-          }
-        };
-
-        recognition.onend = () => {
-          console.log('⚠️ Web Speech API ended');
-          // For persistent listening, ALWAYS restart if call is active
-          // BUT ONLY RESTART IF NOT SPEAKING (to prevent self-listening/echo)
-          if (isCallActiveRef.current && !isSpeakingRef.current && !isPlayingRef.current) {
-            console.log('🔄 Restarting Web Speech API (persistent listening)...');
             setTimeout(() => {
               if (isCallActiveRef.current && recognitionRef.current && !isSpeakingRef.current && !isPlayingRef.current) {
                 restartRecognition();
               }
             }, 100);
+          }
+        };
+
+        recognition.onend = () => {
+          // For persistent listening, restart INSTANTLY (0ms)
+          if (isCallActiveRef.current && !isSpeakingRef.current && !isPlayingRef.current) {
+            // Instant restart
+            if (isCallActiveRef.current && recognitionRef.current) {
+              restartRecognition();
+            }
           } else {
             console.log('⏸️ Web Speech API paused (Agent speaking or intentional stop)');
           }
