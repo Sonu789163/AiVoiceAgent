@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 const WS_URL = (() => {
-  const url =`${import.meta.env.VITE_WS_URL }/connection`; 
+  const url =`${import.meta.env.VITE_WS_URL }/connection`;
   // import.meta.env.VITE_WS_URL ;
   // Convert HTTP/HTTPS to WS/WSS for WebSocket connections
   if (url.startsWith('https://')) {
