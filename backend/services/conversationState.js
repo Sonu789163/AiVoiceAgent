@@ -10,7 +10,9 @@ export class ConversationState {
     this.endTime = null;
     this.sheetRowNumber = null; // Track which row in Google Sheets this session uses
     this.sessionIdUpdated = false; // Track if session ID has been written to sheet
-    this.updateSheetsCallback = null; // Callback function to update Google Sheets
+    this.updateSheetsCallback = null; // Callback function to update Google Sheets (single field)
+    this.updateSheetsBatchCallback = null; // Callback function to update Google Sheets (batch)
+    this.isConfirmed = false; // Track if user has confirmed all information
     this.collectedData = {
       name: null,
       phoneNumber: null,
@@ -31,6 +33,50 @@ export class ConversationState {
   }
 
   /**
+   * Set callback function to update Google Sheets in BATCH
+   * @param {Function} callback - Function to call with (conversationState)
+   */
+  setBatchSheetsUpdateCallback(callback) {
+    this.updateSheetsBatchCallback = callback;
+  }
+
+  /**
+   * Update multiple fields and save to Google Sheets in one go (Batch)
+   * @param {Object} updates - Object with keys and values to update
+   */
+  async updateMultipleFieldsAndSave(updates) {
+    let hasChanges = false;
+    const changedFields = [];
+
+    for (const [fieldName, value] of Object.entries(updates)) {
+      if (this.collectedData[fieldName] !== value) {
+        this.collectedData[fieldName] = value;
+        hasChanges = true;
+        changedFields.push(fieldName);
+        console.log(`📝 updateMultipleFieldsAndSave: ${fieldName} = "${value}"`);
+      }
+    }
+
+    // If values changed and we have a batch callback, update Google Sheets
+    // Even if no values changed, if we have new data that might be missing in sheet, force a save?
+    // Better to rely on hasChanges to avoid redundant writes, but for safety in this specific "Summary" context,
+    // we might want to ensure sync. Let's stick to hasChanges for now to be efficient.
+
+    if (hasChanges && this.updateSheetsBatchCallback) {
+      try {
+        console.log(`💾 Calling batch updateSheetsBatchCallback for fields: ${changedFields.join(', ')}...`);
+        // callback signature: saveToGoogleSheets(conversationState)
+        await this.updateSheetsBatchCallback(this);
+        console.log('✅ Successfully batch updated Google Sheets');
+      } catch (error) {
+        console.error('❌ Error executing batch update to Google Sheets:', error);
+      }
+    } else if (!hasChanges) {
+      console.log('ℹ️ Skipping batch save - no new data found in summary');
+    }
+  }
+
+  /**
    * Update a field and immediately save to Google Sheets
    * @param {string} fieldName - Name of the field
    * @param {*} value - Value to set
@@ -39,13 +85,25 @@ export class ConversationState {
     const oldValue = this.collectedData[fieldName];
     this.collectedData[fieldName] = value;
 
+    console.log(`📝 updateFieldAndSave: ${fieldName} = "${value}" (was: "${oldValue || 'empty'}")`);
+
     // If value changed and we have a callback, update Google Sheets
     if (value && value !== oldValue && this.updateSheetsCallback) {
       try {
+        console.log(`💾 Calling updateSheetsCallback for ${fieldName}...`);
         await this.updateSheetsCallback(fieldName, value);
+        console.log(`✅ Successfully updated ${fieldName} in Google Sheets`);
       } catch (error) {
         console.error(`❌ Error updating ${fieldName} in Google Sheets:`, error);
         // Don't throw - allow conversation to continue
+      }
+    } else {
+      if (!value) {
+        console.log(`⚠️ Skipping save for ${fieldName} - value is empty`);
+      } else if (value === oldValue) {
+        console.log(`ℹ️ Skipping save for ${fieldName} - value unchanged`);
+      } else if (!this.updateSheetsCallback) {
+        console.log(`⚠️ Skipping save for ${fieldName} - no callback set`);
       }
     }
   }
@@ -90,14 +148,14 @@ export class ConversationState {
       // Remove spaces and dashes for easier matching
       const cleanMessage = message.replace(/[\s-]/g, '');
 
-      // Try to extract 10-digit numbers (most common)
-      let phoneMatch = cleanMessage.match(/([6-9]\d{9})/);
+      // Try to extract 10-digit numbers (allow test numbers starting with 0-5 too)
+      let phoneMatch = cleanMessage.match(/(\d{10})/);
       if (phoneMatch && phoneMatch[1]) {
         this.collectedData.phoneNumber = phoneMatch[1];
         console.log('📝 Extracted phone number:', phoneMatch[1]);
       } else {
         // Try with +91 prefix
-        phoneMatch = cleanMessage.match(/(?:\+91)?([6-9]\d{9})/);
+        phoneMatch = cleanMessage.match(/(?:\+91)?(\d{10})/);
         if (phoneMatch && phoneMatch[1]) {
           this.collectedData.phoneNumber = phoneMatch[1];
           console.log('📝 Extracted phone number:', phoneMatch[1]);
@@ -365,46 +423,24 @@ export class ConversationState {
     const collected = [];
     const missing = [];
 
-    if (this.collectedData.name) {
-      collected.push(`Name: ${this.collectedData.name}`);
-    } else {
-      missing.push('Name');
-    }
+    // Define the order of fields to collect
+    const fieldOrder = [
+      { key: 'name', label: 'Name' },
+      { key: 'phoneNumber', label: 'Phone Number' },
+      { key: 'programInterest', label: 'Program Interest' },
+      { key: 'priorEducation', label: 'Prior Education' },
+      { key: 'intakeYear', label: 'Intake Year' },
+      { key: 'city', label: 'City' },
+      { key: 'budget', label: 'Budget' }
+    ];
 
-    if (this.collectedData.programInterest) {
-      collected.push(`Program Interest: ${this.collectedData.programInterest}`);
-    } else {
-      missing.push('Program Interest');
-    }
-
-    if (this.collectedData.priorEducation) {
-      collected.push(`Prior Education: ${this.collectedData.priorEducation}`);
-    } else {
-      missing.push('Prior Education');
-    }
-
-    if (this.collectedData.intakeYear) {
-      collected.push(`Intake Year: ${this.collectedData.intakeYear}`);
-    } else {
-      missing.push('Intake Year');
-    }
-
-    if (this.collectedData.city) {
-      collected.push(`City: ${this.collectedData.city}`);
-    } else {
-      missing.push('City');
-    }
-
-    if (this.collectedData.budget) {
-      collected.push(`Budget: ${this.collectedData.budget}`);
-    } else {
-      missing.push('Budget');
-    }
-
-    if (this.collectedData.phoneNumber) {
-      collected.push(`Phone Number: ${this.collectedData.phoneNumber}`);
-    } else {
-      missing.push('Phone Number');
+    // Check each field in order
+    for (const field of fieldOrder) {
+      if (this.collectedData[field.key]) {
+        collected.push(`${field.label}: ${this.collectedData[field.key]}`);
+      } else {
+        missing.push(field.label);
+      }
     }
 
     let context = '';
@@ -414,10 +450,17 @@ export class ConversationState {
     }
 
     if (missing.length > 0) {
-      context += `\n### 🎯 STILL NEED TO COLLECT:\n${missing.join(', ')}\n`;
-      context += `\n**NEXT QUESTION:** Ask about: ${missing[0]}\n`;
+      // Find the FIRST missing field in the sequence
+      const nextField = missing[0];
+
+      context += `\n### 🎯 STILL NEED TO COLLECT (in order):\n${missing.join(', ')}\n`;
+      context += `\n**NEXT QUESTION (Ask for THIS ONLY):** ${nextField}\n`;
+      context += `**IMPORTANT**: Ask for "${nextField}" now. Don't ask for multiple fields at once!\n`;
     } else {
-      context += `\n### ✅ ALL INFORMATION COLLECTED!\nYou have collected all required information. Thank the user and let them know they will be contacted soon.\n`;
+      context += `\n### ✅ ALL INFORMATION COLLECTED!\n`;
+      context += `\n**MANDATORY NEXT STEP**: You MUST now read back ALL the collected information to the user and ask for confirmation.\n`;
+      context += `Say something like: "Great! Let me confirm everything: [list all 7 fields]. Is this all correct?"\n`;
+      context += `Wait for user confirmation before ending the conversation.\n`;
     }
 
     return context;
@@ -467,7 +510,111 @@ export class ConversationState {
       sessionId: this.sessionId,
       startTime: this.startTime,
       endTime: this.endTime,
+      isConfirmed: this.isConfirmed,
     };
+  }
+
+  /**
+   * Check if all required data has been collected
+   * @returns {boolean} True if all fields are filled
+   */
+  isAllDataCollected() {
+    return !!(
+      this.collectedData.name &&
+      this.collectedData.phoneNumber &&
+      this.collectedData.programInterest &&
+      this.collectedData.priorEducation &&
+      this.collectedData.intakeYear &&
+      this.collectedData.city &&
+      this.collectedData.budget
+    );
+  }
+
+  /**
+   * Mark the data as confirmed by the user
+   */
+  markAsConfirmed() {
+    this.isConfirmed = true;
+    console.log(`✅ Session ${this.sessionId} data marked as CONFIRMED by user`);
+  }
+
+  /**
+   * Extract confirmed data from the AI's summary block
+   * This acts as a fail-safe to catch any data the regex might have missed
+   * @param {string} response - The full text response from the assistant
+   */
+  updateFromAssistantResponse(response) {
+    if (!response) return;
+
+    // Look for the bulleted list lines (e.g., "- Name: John" or "* Phone: 123...")
+    const lines = response.split('\n');
+    let foundSummary = false;
+    const batchUpdates = {};
+
+    for (const line of lines) {
+      const cleanLine = line.trim();
+
+      // Match pattern: "- Label: Value" (allows -, *, • or nothing at start, AND indentation)
+      // Fix: Added ^\s* to allow leading spaces before bullet
+      // Capture groups: 1=Label, 2=Value
+      const match = cleanLine.match(/^\s*[-*•]?\s*([a-zA-Z\s]+):\s*(.+)$/);
+
+      if (match) {
+        foundSummary = true;
+        const key = match[1].toLowerCase().trim();
+        const value = match[2].trim();
+
+        console.log(`🔍 Parsed Summary Line: Key="${key}", Value="${value}"`);
+
+        // Skip if value is empty or just placeholders
+        if (!value || value === '-' || value === 'N/A') continue;
+
+        // Collect updates in an object
+        // CRITICAL FIX: Always overwrite with summary data as it is the "Gold Standard"
+        // Previous logic only updated if field was empty, which kept garbage data (e.g. Name="studying in")
+
+        if (key.includes('name') || key.includes('naam')) {
+          batchUpdates.name = value;
+        }
+        else if (key.includes('phone') || key.includes('mobile')) {
+          // Clean phone number if needed (keep digits)
+          const cleanPhone = value.replace(/\D/g, '');
+          const finalPhone = cleanPhone.length >= 10 ? cleanPhone : value;
+          batchUpdates.phoneNumber = finalPhone;
+        }
+        else if (key.includes('course') || key.includes('program')) {
+          batchUpdates.programInterest = value;
+        }
+        else if (key.includes('education') || key.includes('qualification') || key.includes('barahvi')) {
+          batchUpdates.priorEducation = value;
+        }
+        else if (key.includes('year') || key.includes('saal') || key.includes('intake')) {
+          batchUpdates.intakeYear = value;
+        }
+        else if (key.includes('city') || key.includes('location')) {
+          batchUpdates.city = value;
+        }
+        else if (key.includes('budget')) {
+          batchUpdates.budget = value;
+        }
+      } else {
+        // Debug log for non-matching lines (helps debug silent failures)
+        // Only log if it looks like a list item to avoid noise
+        if (line.includes(':')) {
+          console.log(`⚠️ Skiping line (no regex match): "${cleanLine}"`);
+        }
+      }
+    }
+
+    console.log(`✅ Summary Parse Complete. Found ${Object.keys(batchUpdates).length} updates.`);
+
+    if (foundSummary) {
+      console.log('✅ Processed AI summary. Batch updates:', batchUpdates);
+      // Perform a single batch update for all collected fields
+      if (Object.keys(batchUpdates).length > 0) {
+        this.updateMultipleFieldsAndSave(batchUpdates);
+      }
+    }
   }
 
   reset() {

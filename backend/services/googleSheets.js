@@ -11,7 +11,7 @@ const SPREADSHEET_ID = '15KSNdceVyEIv8O8F6Za93oi_SLtA-V2S83ARzAbFZQg';
 const SHEET_NAME = 'Sheet1'; // Default sheet name
 const HEADER_ROW = 1; // Header row number
 const DATA_START_ROW = 2; // Data starts from row 2 (after headers)
-const RANGE = 'A:H'; // Columns A to H (Session, Name, Phone, Interest, City, Education, Intake, Budget)
+const RANGE = 'A:I'; // Columns A to I (Session, Name, Phone, Interest, City, Education, Intake, Budget, Status)
 
 /**
  * Initialize Google Sheets API client
@@ -171,17 +171,17 @@ export async function updateFieldInGoogleSheets(conversationState, fieldName, va
 
     // Map field names to column letters
     // Column structure from user's sheet:
-    // A=SessionId, B=Stu. Name, C=Phone Number, D=Course, E=Phone no., F=City, G=Education, H=Intake Year
+    // A=SessionId, B=Stu. Name, C=Phone Number, D=Course, E=City, F=Education, G=Intake Year, H=Budget, I=Status
     const fieldToColumn = {
       'sessionId': 'A',        // SessionId (Column A)
       'name': 'B',             // Stu. Name (Column B)
       'phoneNumber': 'C',      // Phone Number (Column C)
       'programInterest': 'D',  // Course (Column D)
-      'city': 'E',             // City (Column F)
-      'priorEducation': 'F',   // Education (Column G)
-      'intakeYear': 'G',       // Intake Year (Column H)
-      'budget': 'H',           // Budget (Column I) - adding new column
-      // Note: Column E (Phone no.) is duplicate of C, we'll update both
+      'city': 'E',             // City (Column E)
+      'priorEducation': 'F',   // Education (Column F)
+      'intakeYear': 'G',       // Intake Year (Column G)
+      'budget': 'H',           // Budget (Column H)
+      'status': 'I',           // Status (Column I) - Confirmed or Partial
     };
 
     const column = fieldToColumn[fieldName];
@@ -262,42 +262,54 @@ export async function saveToGoogleSheets(conversationState) {
     console.log('📋 Session ID:', sessionInfo.sessionId);
     console.log('📋 Collected Data:', collectedData);
 
-    // If row already exists, just ensure all fields are updated
+    // If row already exists, update ALL fields at once
     if (conversationState.sheetRowNumber) {
-      console.log(`📝 Row ${conversationState.sheetRowNumber} already exists, ensuring all fields are updated`);
+      console.log(`📝 Row ${conversationState.sheetRowNumber} already exists, updating ALL fields`);
+      const sheets = await getSheetsClient();
 
-      // Ensure session ID is set
-      if (!conversationState.sessionIdUpdated) {
-        const sessionCellRange = `${SHEET_NAME}!A${conversationState.sheetRowNumber}`;
-        const sheets = await getSheetsClient();
-        await sheets.spreadsheets.values.update({
-          spreadsheetId: SPREADSHEET_ID,
-          range: sessionCellRange,
-          valueInputOption: 'USER_ENTERED',
-          resource: {
-            values: [[sessionInfo.sessionId]],
-          },
-        });
-        conversationState.sessionIdUpdated = true;
-        console.log(`📝 Set Session ID in ${sessionCellRange}`);
-      }
+      // Determine status based on confirmation
+      const status = sessionInfo.isConfirmed ? 'Confirmed' : 'Partial';
 
-      // Update any missing fields
-      const fields = [
-        { name: 'name', value: collectedData.name },
-        { name: 'phoneNumber', value: collectedData.phoneNumber },
-        { name: 'programInterest', value: collectedData.programInterest },
-        { name: 'city', value: collectedData.city },
-        { name: 'priorEducation', value: collectedData.priorEducation },
-        { name: 'intakeYear', value: collectedData.intakeYear },
-        { name: 'budget', value: collectedData.budget },
+      // Prepare complete row data with ALL fields
+      const rowData = [
+        sessionInfo.sessionId || '',           // Column A: SessionId
+        collectedData.name || '',              // Column B: Stu. Name
+        collectedData.phoneNumber || '',       // Column C: Phone Number
+        collectedData.programInterest || '',   // Column D: Course
+        collectedData.city || '',              // Column E: City
+        collectedData.priorEducation || '',    // Column F: Education
+        collectedData.intakeYear || '',        // Column G: Intake Year
+        collectedData.budget || '',            // Column H: Budget
+        status,                                // Column I: Status (Confirmed/Partial)
       ];
 
-      for (const field of fields) {
-        if (field.value) {
-          await updateFieldInGoogleSheets(conversationState, field.name, field.value);
-        }
-      }
+      // Detailed logging of each field
+      console.log('📊 DETAILED ROW DATA:');
+      console.log(`  A - Session ID: "${rowData[0]}"`);
+      console.log(`  B - Name: "${rowData[1]}" ${!rowData[1] ? '⚠️ EMPTY' : '✅'}`);
+      console.log(`  C - Phone: "${rowData[2]}" ${!rowData[2] ? '⚠️ EMPTY' : '✅'}`);
+      console.log(`  D - Course: "${rowData[3]}" ${!rowData[3] ? '⚠️ EMPTY' : '✅'}`);
+      console.log(`  E - City: "${rowData[4]}" ${!rowData[4] ? '⚠️ EMPTY' : '✅'}`);
+      console.log(`  F - Education: "${rowData[5]}" ${!rowData[5] ? '⚠️ EMPTY' : '✅'}`);
+      console.log(`  G - Year: "${rowData[6]}" ${!rowData[6] ? '⚠️ EMPTY' : '✅'}`);
+      console.log(`  H - Budget: "${rowData[7]}" ${!rowData[7] ? '⚠️ EMPTY' : '✅'}`);
+      console.log(`  I - Status: "${rowData[8]}"`);
+
+      // Update the ENTIRE row at once
+      const range = `${SHEET_NAME}!A${conversationState.sheetRowNumber}:I${conversationState.sheetRowNumber}`;
+
+      console.log(`📝 Updating range: ${range}`);
+
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: range,
+        valueInputOption: 'USER_ENTERED',
+        resource: {
+          values: [rowData],
+        },
+      });
+
+      console.log(`✅ Updated entire row ${conversationState.sheetRowNumber} with all fields`);
 
       return {
         success: true,
@@ -308,8 +320,11 @@ export async function saveToGoogleSheets(conversationState) {
     // If no row exists yet, create one with all data
     const rowNumber = await findOrCreateSessionRow(conversationState);
 
+    // Determine status based on confirmation
+    const status = sessionInfo.isConfirmed ? 'Confirmed' : 'Partial';
+
     // Map collected data to sheet columns
-    // Column structure: A=SessionId, B=Stu. Name, C=Phone Number, D=Course, E=Phone no., F=City, G=Education, H=Intake Year, I=Budget
+    // Column structure: A=SessionId, B=Stu. Name, C=Phone Number, D=Course, E=City, F=Education, G=Intake Year, H=Budget, I=Status
     const rowData = [
       sessionInfo.sessionId || '',           // Column A: SessionId
       collectedData.name || '',              // Column B: Stu. Name
@@ -319,11 +334,12 @@ export async function saveToGoogleSheets(conversationState) {
       collectedData.priorEducation || '',    // Column F: Education
       collectedData.intakeYear || '',        // Column G: Intake Year
       collectedData.budget || '',            // Column H: Budget
+      status,                                // Column I: Status (Confirmed/Partial)
     ];
 
     // Update the entire row
     const sheets = await getSheetsClient();
-    const range = `${SHEET_NAME}!A${rowNumber}:H${rowNumber}`;
+    const range = `${SHEET_NAME}!A${rowNumber}:I${rowNumber}`;
 
     const response = await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
@@ -381,7 +397,7 @@ export async function getStudentData() {
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${SHEET_NAME}!A:H`, // All data columns
+      range: `${SHEET_NAME}!A:I`, // All data columns including status
     });
 
     const rows = response.data.values || [];
@@ -406,6 +422,7 @@ export async function getStudentData() {
         priorEducation: row[5] || '',
         intakeYear: row[6] || '',
         budget: row[7] || '',
+        status: row[8] || 'Partial', // Default to Partial if not set
       }));
 
     console.log(`📊 Retrieved ${students.length} student records from Google Sheets`);

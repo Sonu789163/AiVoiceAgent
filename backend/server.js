@@ -123,6 +123,12 @@ fastify.register(async function (fastify) {
           await updateFieldInGoogleSheets(conversationState, fieldName, value);
         });
 
+        // Set up BATCH callback for AI summary updates (fixes race conditions)
+        conversationState.setBatchSheetsUpdateCallback(async (state) => {
+          console.log('💾 Batch updating fields in Google Sheets...');
+          await saveToGoogleSheets(state);
+        });
+
         // Test the method
         const testContext = conversationState.getContextString();
         console.log('✅ getContextString() test successful, length:', testContext.length);
@@ -182,6 +188,30 @@ fastify.register(async function (fastify) {
             }
             if (changes.length > 0) {
               console.log('✅ Data extracted:', changes.join(', '));
+            }
+
+            // Check if user is confirming the information
+            // Look for confirmation keywords in the transcript
+            const confirmationKeywords = [
+              /\b(yes|yeah|yep|correct|right|sahi|theek|bilkul|haan|ha|okay|ok|perfect|good)\b/i,
+              /\b(all correct|everything is correct|sab sahi|sab theek)\b/i
+            ];
+
+            const isConfirmation = confirmationKeywords.some(pattern => pattern.test(transcript.toLowerCase()));
+
+            // If all data is collected and user confirms, mark as confirmed
+            if (isConfirmation && conversationState.isAllDataCollected() && !conversationState.isConfirmed) {
+              conversationState.markAsConfirmed();
+              console.log('🎉 User has CONFIRMED all information!');
+
+              // Do a final save to ensure all data is in the sheet
+              try {
+                console.log('💾 Performing FINAL CONFIRMED save to Google Sheets...');
+                await saveToGoogleSheets(conversationState);
+                console.log('✅ Final confirmed data saved successfully');
+              } catch (error) {
+                console.error('❌ Error saving confirmed data:', error);
+              }
             }
           } catch (error) {
             console.error('❌ Error updating conversation state:', error);
@@ -277,6 +307,24 @@ fastify.register(async function (fastify) {
           // OpenAI stream finished
           console.log('✅ OpenAI streaming completed. Updated messages count:', messages.length);
 
+          // Log the full AI response to the frontend
+          if (messages.length > 0) {
+            const lastAiMessage = messages[messages.length - 1];
+            if (lastAiMessage.role === 'assistant') {
+              // Send full text to frontend for logging
+              socket.send(JSON.stringify({
+                type: 'ai_response',
+                text: lastAiMessage.content
+              }));
+
+              // Extract any confirmed data from the AI's summary
+              // This fixes the issue where AI "knows" the data but backend didn't catch it via regex
+              if (conversationState) {
+                conversationState.updateFromAssistantResponse(lastAiMessage.content);
+              }
+            }
+          }
+
           // Handle any remaining buffer
           if (currentSentenceBuffer.trim()) {
             sentenceQueue.push(currentSentenceBuffer.trim());
@@ -287,6 +335,21 @@ fastify.register(async function (fastify) {
 
           // Wait for all TTS to finish
           await sentenceProcessingPromise;
+
+          // If user just confirmed, send signal to end call automatically
+          if (conversationState.isConfirmed) {
+            console.log('📞 User confirmed - sending auto end call signal after 2 seconds...');
+            // Wait 2 seconds to let the final "Thank you" message play
+            setTimeout(() => {
+              if (socket && socket.readyState === 1) {
+                console.log('📞 Sending end_call signal to frontend');
+                socket.send(JSON.stringify({
+                  type: 'end_call',
+                  message: 'Call ending automatically after confirmation'
+                }));
+              }
+            }, 2000);
+          }
 
         } catch (error) {
           console.error('❌ Error processing transcript:', error);
@@ -327,6 +390,7 @@ fastify.register(async function (fastify) {
                 try {
                   conversationState.closeSession();
                   const collectedData = conversationState.getCollectedData();
+                  const sessionInfo = conversationState.getSessionInfo();
 
                   // Save if we have any data
                   const hasAnyData = collectedData.name || collectedData.phoneNumber ||
@@ -334,7 +398,12 @@ fastify.register(async function (fastify) {
                     collectedData.intakeYear || collectedData.city || collectedData.budget;
 
                   if (hasAnyData) {
-                    console.log('💾 Saving conversation data to Google Sheets...');
+                    if (sessionInfo.isConfirmed) {
+                      console.log('💾 Saving FINAL CONFIRMED data to Google Sheets...');
+                    } else {
+                      console.log('💾 Saving PARTIAL/UNCONFIRMED data to Google Sheets (user exited early)...');
+                    }
+
                     try {
                       await saveToGoogleSheets(conversationState);
                       console.log('✅ Data saved to Google Sheets successfully');
@@ -376,10 +445,12 @@ fastify.register(async function (fastify) {
           try {
             conversationState.closeSession();
             const collectedData = conversationState.getCollectedData();
+            const sessionInfo = conversationState.getSessionInfo();
             const dataSummary = conversationState.getDataSummary();
 
             console.log('📊 Final collected data summary:', dataSummary);
             console.log('📊 Full data object:', collectedData);
+            console.log('📊 Confirmation status:', sessionInfo.isConfirmed ? 'CONFIRMED ✅' : 'NOT CONFIRMED ⚠️');
 
             // Save to Google Sheets if we have ANY data
             const hasAnyData = collectedData.name || collectedData.phoneNumber ||
@@ -387,7 +458,12 @@ fastify.register(async function (fastify) {
               collectedData.intakeYear || collectedData.city || collectedData.budget;
 
             if (hasAnyData) {
-              console.log('💾 Saving conversation data to Google Sheets (new row for this session)...');
+              if (sessionInfo.isConfirmed) {
+                console.log('💾 Saving FINAL CONFIRMED data to Google Sheets...');
+              } else {
+                console.log('💾 Saving PARTIAL/UNCONFIRMED data to Google Sheets (user exited early)...');
+              }
+
               try {
                 await saveToGoogleSheets(conversationState);
                 console.log('✅ Data saved to Google Sheets successfully');
