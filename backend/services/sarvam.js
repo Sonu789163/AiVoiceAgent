@@ -26,7 +26,7 @@ export async function streamSarvamTTS(text, onAudioChunk, options = {}) {
         const config = {
             target_language_code: options.language || 'hi-IN', // Default to Hindi
             speaker: options.speaker || 'vidya', // Default speaker
-            pitch: options.pitch !== undefined ? options.pitch : 0.5,
+            pitch: options.pitch !== undefined ? options.pitch : 0.1,
             pace: options.pace !== undefined ? options.pace : 1.2,
             loudness: options.loudness !== undefined ? options.loudness : 1,
             speech_sample_rate: options.sampleRate || 16000, // 16kHz for WebSocket compatibility
