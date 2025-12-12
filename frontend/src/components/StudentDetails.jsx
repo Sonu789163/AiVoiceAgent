@@ -136,15 +136,19 @@ export default function StudentDetails() {
             </div>
 
             <div className="table-footer">
+                <div>
                 <p style={{ color: "white" }}>
                     <strong>Total Students:</strong> {filteredStudents.length}
                     {searchTerm && students.length !== filteredStudents.length &&
                         ` (filtered from ${students.length})`
                     }
                 </p>
+                </div>
+                <div>
                 <p style={{ color: "white" }}>
                     <strong>Last Updated:</strong> {lastUpdated.toLocaleTimeString()}
                 </p>
+                </div>
             </div>
         </div>
     );

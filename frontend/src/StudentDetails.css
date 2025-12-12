@@ -273,6 +273,7 @@
 /* Responsive Design */
 @media (max-width: 768px) {
   .student-details {
+    margin: 0.5rem;
     padding: 1rem;
   }
 
@@ -293,11 +294,13 @@
     width: 100%;
   }
 
-  .table-container {
-    border-radius: 8px;
+  .table-container { 
+    overflow: auto;
+  max-height: 500px;
   }
 
   .students-table {
+    
     font-size: 0.85rem;
   }
 
@@ -307,12 +310,29 @@
   }
 
   .table-footer {
-    flex-direction: column;
-    gap: 0.5rem;
+   display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  width: 100%;
+  justify-content: space-between;
+  padding-left: 0.5rem;
   }
 }
 
 @media (max-width: 480px) {
+  .table-container {
+  overflow: auto;
+  max-height: 420px;
+}
+.table-footer {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  width: 100%;
+  justify-content: space-between;
+  padding-left: 0.5rem;
+}
+.table-footer div {
+  width: 200px;
+}
   .students-table {
     font-size: 0.75rem;
   }

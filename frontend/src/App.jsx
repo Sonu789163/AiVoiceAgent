@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 const WS_URL = (() => {
-  const url =`${import.meta.env.VITE_WS_URL }/connection`;
+  const url = `${import.meta.env.VITE_WS_URL}/connection`;
   // import.meta.env.VITE_WS_URL ;
   // Convert HTTP/HTTPS to WS/WSS for WebSocket connections
   if (url.startsWith('https://')) {
@@ -456,7 +456,7 @@ function App({ onCallStatusChange }) {
 
     // 2. Clear audio queues
     audioQueueRef.current = [];
-    pcmBufferRef.current = new Float32Array(0);
+    pcmBufferRef.current = new Uint8Array(0); // Fixed: Use Uint8Array to match buffer type
 
     // 3. Cancel any browser TTS
     if ('speechSynthesis' in window) {
@@ -484,19 +484,10 @@ function App({ onCallStatusChange }) {
     isPlayingRef.current = true;
     setStatus('speaking');
 
-    // CRITICAL for Echo Cancellation: Stop recognition while speaking
-    // This prevents the agent from hearing itself on speakers
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.abort();
-        console.log('🔇 Recognition paused for playback');
-
-        // Safety delay to ensure microphone is fully off before audio starts
-        await new Promise(resolve => setTimeout(resolve, 200));
-      } catch (e) {
-        // Ignore errors
-      }
-    }
+    // BARGE-IN ENABLED: Keep recognition running during playback
+    // This allows the user to interrupt the agent at any time
+    // Note: This may cause echo on speakers - use headphones for best experience
+    console.log('� Starting playback (recognition stays active for barge-in)');
 
     try {
       // Audio context should already be initialized
@@ -698,6 +689,7 @@ function App({ onCallStatusChange }) {
         recognition.continuous = true;
         recognition.interimResults = true;
         recognition.lang = 'en-US';
+        recognition.maxAlternatives = 3; // Get confidence scores for noise filtering
 
         recognition.onstart = () => {
           console.log('✅ Web Speech API started');
@@ -712,6 +704,7 @@ function App({ onCallStatusChange }) {
 
         silenceTimerRef.current = setInterval(() => {
           // Don't process VAD if we are speaking/playing audio
+          // This prevents false triggers from agent's own speech
           if (!isCallActiveRef.current || !recognitionRef.current || isSpeakingRef.current || isPlayingRef.current) return;
 
           const now = Date.now();
@@ -720,9 +713,16 @@ function App({ onCallStatusChange }) {
 
           // If we have pending speech and enough silence has passed
           if (hasInterim && timeSinceLastSpeech > silenceThreshold) {
-            console.log(`🚀 Turbo VAD: Silence detected (${timeSinceLastSpeech}ms) - Sending transcript manually`);
-
             const textToSend = interimTranscriptRef.current.trim();
+
+            // NOISE FILTER: Require minimum length (at least 3 characters)
+            if (textToSend.length < 3) {
+              console.log(`� Turbo VAD: Filtered short utterance (${textToSend.length} chars): "${textToSend}"`);
+              interimTranscriptRef.current = '';
+              return;
+            }
+
+            console.log(`🚀 Turbo VAD: Silence detected (${timeSinceLastSpeech}ms) - Sending transcript manually`);
 
             // Send if valid
             if (textToSend && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -747,47 +747,115 @@ function App({ onCallStatusChange }) {
         recognition.onresult = (event) => {
           let finalTranscript = '';
           let interimTranscript = '';
+          let maxConfidence = 0;
 
+          // NOISE FILTERING: Check confidence scores
           for (let i = event.resultIndex; i < event.results.length; i++) {
-            const transcript = event.results[i][0].transcript;
-            if (event.results[i].isFinal) {
+            const result = event.results[i];
+            const transcript = result[0].transcript;
+            const confidence = result[0].confidence || (result.isFinal ? 1 : 0.8); // Estimate confidence for interim
+
+            // Track max confidence for logging
+            if (confidence > maxConfidence) {
+              maxConfidence = confidence;
+            }
+
+            // FILTER 1: Confidence threshold - ignore low confidence (likely noise)
+            // For interim results, we're more lenient (0.5), for final we require 0.6
+            const confidenceThreshold = result.isFinal ? 0.6 : 0.5;
+
+            if (confidence < confidenceThreshold) {
+              console.log(`🔇 Filtered low confidence (${confidence.toFixed(2)}): "${transcript}"`);
+              continue; // Skip this result
+            }
+
+            if (result.isFinal) {
               finalTranscript += transcript + ' ';
             } else {
               interimTranscript += transcript;
             }
           }
 
-          // Debug logs for tuning
-          // console.log('Speech Event:', { final: finalTranscript, interim: interimTranscript });
+          // FILTER 2: Minimum length - ignore very short utterances (likely noise)
+          // Interim needs at least 2 chars, final needs at least 3
+          const hasValidInterim = interimTranscript.trim().length >= 2;
+          const hasValidFinal = finalTranscript.trim().length >= 3;
 
-          // Update refs for Turbo VAD
-          if (interimTranscript.trim().length > 0) {
+          // FILTER 3: Noise pattern detection - filter out common noise patterns
+          const noisePatterns = [
+            /^(uh|um|ah|eh|hm|mm)$/i,  // Filler sounds
+            /^[^a-z0-9\s]+$/i,          // Only special characters
+            /^(.)\1+$/,                 // Repeated single character (e.g., "aaaa")
+          ];
+
+          const isNoise = (text) => {
+            const trimmed = text.trim().toLowerCase();
+            return noisePatterns.some(pattern => pattern.test(trimmed));
+          };
+
+          // Filter out noise from transcripts
+          if (hasValidInterim && isNoise(interimTranscript)) {
+            console.log(`🔇 Filtered noise pattern: "${interimTranscript}"`);
+            interimTranscript = '';
+          }
+
+          if (hasValidFinal && isNoise(finalTranscript)) {
+            console.log(`🔇 Filtered noise pattern: "${finalTranscript}"`);
+            finalTranscript = '';
+          }
+
+          // Debug logs for tuning (uncomment to see confidence scores)
+          // console.log('Speech Event:', { 
+          //   final: finalTranscript, 
+          //   interim: interimTranscript, 
+          //   confidence: maxConfidence.toFixed(2) 
+          // });
+
+          // Update refs for Turbo VAD (only if passed filters)
+          if (hasValidInterim && interimTranscript.trim().length > 0) {
             lastSpeechTimeRef.current = Date.now();
             interimTranscriptRef.current = interimTranscript;
-          } else if (finalTranscript.trim().length > 0) {
+          } else if (hasValidFinal && finalTranscript.trim().length > 0) {
             // If we got a final, clear interim logic so we don't double send
             interimTranscriptRef.current = '';
             lastSpeechTimeRef.current = Date.now();
           }
 
-          // BARGE-IN LOGIC: If user speaks while agent is speaking, stop the agent!
-          if (isSpeakingRef.current && (finalTranscript || interimTranscript.length > 2)) {
-            console.log('🗣️ User starts speaking - Interrupting agent (Barge-in)');
+          // BARGE-IN LOGIC with NOISE FILTERING
+          // Only trigger if:
+          // 1. Agent is speaking/playing
+          // 2. We have valid speech (passed all filters above)
+          // 3. Minimum length for barge-in (at least 3 characters to avoid false triggers)
+          // 4. Debounce: At least 200ms since last barge-in attempt
+          const MIN_BARGE_IN_LENGTH = 3; // Require at least 3 characters for barge-in
+          const BARGE_IN_DEBOUNCE = 200; // ms between barge-in attempts
+
+          const hasValidBargeInSpeech = (finalTranscript && finalTranscript.trim().length >= MIN_BARGE_IN_LENGTH) ||
+            (interimTranscript && interimTranscript.trim().length >= MIN_BARGE_IN_LENGTH);
+
+          const timeSinceLastBargeIn = Date.now() - (window.lastBargeInTime || 0);
+          const canBargeIn = timeSinceLastBargeIn >= BARGE_IN_DEBOUNCE;
+
+          if ((isSpeakingRef.current || isPlayingRef.current) && hasValidBargeInSpeech && canBargeIn) {
+            console.log(`🗣️ User interrupting agent (Barge-in) - Confidence: ${maxConfidence.toFixed(2)}`);
+            window.lastBargeInTime = Date.now(); // Update debounce timer
+
             stopAgentSpeech();
             // Clear interim buffer on barge-in to avoid processing old speech
             interimTranscriptRef.current = '';
 
-            // Optionally send stop signal to backend to cancel generation
+            // Send stop signal to backend to cancel generation
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
               wsRef.current.send(JSON.stringify({ type: 'stop_generation' }));
+              console.log('📤 Sent stop_generation to backend');
             }
           }
 
-          // Send final transcript to backend
+          // Send final transcript to backend (only if passed all filters)
           // Note: Turbo VAD might have already sent this if it was slow.
           // But if the API is fast enough, we send it here.
-          if (finalTranscript.trim()) {
-            console.log('📝 Final transcript (API):', finalTranscript.trim());
+          if (hasValidFinal && finalTranscript.trim()) {
+            console.log('📝 Final transcript (API):', finalTranscript.trim(), `(confidence: ${maxConfidence.toFixed(2)})`);
 
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
               wsRef.current.send(JSON.stringify({

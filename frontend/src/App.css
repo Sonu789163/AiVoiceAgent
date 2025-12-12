@@ -263,17 +263,66 @@
 }
 
 @media (max-width: 600px) {
+  .app {
+    padding: 1rem 0.5rem;
+    min-height: 100vh;
+    align-items: flex-start;
+  }
+
   .container {
-    padding: 24px;
-    margin: 16px;
+    padding: 20px;
+    margin: 0;
+    max-width: 100%;
+  }
+
+  .header {
+    margin-bottom: 20px;
+    padding: 12px;
   }
 
   .header h1 {
     font-size: 24px;
   }
 
+  .subtitle {
+    font-size: 14px;
+  }
+
+  .status-card {
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .pulse {
+    width: 60px;
+    height: 60px;
+    font-size: 24px;
+  }
+
+  .status-text {
+    font-size: 16px;
+  }
+
   .btn {
     min-width: 100%;
     padding: 14px 24px;
+    font-size: 16px;
+  }
+
+  .controls {
+    margin-bottom: 20px;
+  }
+
+  .info {
+    padding: 16px;
+    font-size: 13px;
+  }
+
+  .info p {
+    margin-bottom: 8px;
+  }
+
+  .info li {
+    padding: 6px 0;
   }
 }
