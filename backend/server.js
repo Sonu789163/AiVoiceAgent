@@ -261,7 +261,7 @@ fastify.register(async function (fastify) {
                       socket.send(Buffer.from(audioChunk));
                     }
                   }
-                });
+                }, {}, checkCancellation); // Pass checkCancellation for barge-in support
               } catch (error) {
                 console.error('❌ Error streaming TTS:', error);
               }

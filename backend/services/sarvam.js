@@ -5,9 +5,10 @@ import axios from 'axios';
  * @param {string} text - Text to convert to speech
  * @param {function} onAudioChunk - Callback function to handle audio chunks
  * @param {object} options - Optional TTS configuration
+ * @param {function} checkCancellation - Optional callback to check if streaming should be cancelled
  * @returns {Promise<void>}
  */
-export async function streamSarvamTTS(text, onAudioChunk, options = {}) {
+export async function streamSarvamTTS(text, onAudioChunk, options = {}, checkCancellation = null) {
     const apiKey = process.env.SARVAM_API_KEY;
 
     if (!apiKey) {
@@ -133,6 +134,12 @@ export async function streamSarvamTTS(text, onAudioChunk, options = {}) {
         let offset = 0;
 
         while (offset < pcmData.length) {
+            // Check if we should cancel (barge-in)
+            if (checkCancellation && checkCancellation()) {
+                console.log('🛑 Sarvam TTS streaming cancelled (Barge-in)');
+                return;
+            }
+
             const chunk = pcmData.slice(offset, Math.min(offset + chunkSize, pcmData.length));
 
             // Send chunk to callback
