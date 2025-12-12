@@ -161,7 +161,7 @@ function App({ onCallStatusChange }) {
               // Automatically end the call after confirmation
               setTimeout(() => {
                 stopCall();
-              }, 500); // Small delay to ensure final message is heard
+              }, 1000); // Small delay to ensure final message is heard
             } else if (data.type === 'ai_response') {
               console.log('🤖 AI RESPONSE:', data.text);
             } else if (data.error) {
