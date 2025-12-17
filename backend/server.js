@@ -38,7 +38,8 @@ console.log('✅ All required environment variables are set\n');
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import { streamChatCompletion } from './services/openai.js';
-import { streamSarvamTTS } from './services/sarvam.js';
+// import { streamSarvamTTS } from './services/sarvam.js'; // TEMPORARILY DISABLED FOR TESTING
+import { streamClonedVoiceTTS } from './services/clonedVoice.js'; // USING CLONED VOICE FOR TESTING
 import { ConversationState } from './services/conversationState.js';
 import { saveToGoogleSheets, updateFieldInGoogleSheets } from './services/googleSheets.js';
 
@@ -219,57 +220,9 @@ fastify.register(async function (fastify) {
 
           console.log('✅ conversationState validated successfully before streamChatCompletion');
 
-          // Stream OpenAI response and collect sentences
-          // Latency Optimization: Process sentences AS SOON AS they are ready
-          const sentenceQueue = [];
-          let isOpenAIComplete = false;
-          let sentenceProcessingPromise = null;
-
-          // Consumer: Process sentences and stream TTS
-          const processSentenceQueue = async () => {
-            while (true) {
-              // Wait for a sentence or completion
-              if (sentenceQueue.length === 0) {
-                if (isOpenAIComplete) break;
-                // Wait a bit
-                await new Promise(resolve => setTimeout(resolve, 50));
-                continue;
-              }
-
-              // Get next sentence
-              const sentence = sentenceQueue.shift();
-
-              // Check cancellation
-              if (processingState.shouldCancel) break;
-
-              console.log('🎤 Step 2: Sending sentence to Sarvam TTS (Streaming):', sentence);
-              try {
-                await streamSarvamTTS(sentence, (audioChunk) => {
-                  if (processingState.shouldCancel) return;
-
-                  if (socket && socket.readyState === 1) {
-                    if (Buffer.isBuffer(audioChunk)) {
-                      socket.send(audioChunk);
-                    } else if (audioChunk instanceof ArrayBuffer) {
-                      socket.send(audioChunk);
-                    } else if (audioChunk.buffer instanceof ArrayBuffer) {
-                      socket.send(audioChunk.buffer.slice(
-                        audioChunk.byteOffset,
-                        audioChunk.byteOffset + audioChunk.byteLength
-                      ));
-                    } else {
-                      socket.send(Buffer.from(audioChunk));
-                    }
-                  }
-                }, {}, checkCancellation); // Pass checkCancellation for barge-in support
-              } catch (error) {
-                console.error('❌ Error streaming TTS:', error);
-              }
-            }
-          };
-
-          // Start the consumer loop
-          sentenceProcessingPromise = processSentenceQueue();
+          // Stream OpenAI response and collect ALL text first
+          // NEW APPROACH: Batch entire response into ONE audio for continuous speech
+          let fullResponseText = '';
 
           // Check cancellation function
           const checkCancellation = () => {
@@ -281,25 +234,8 @@ fastify.register(async function (fastify) {
             messages,
             conversationState,
             (token) => {
-              // Buffer tokens into sentences
-              currentSentenceBuffer += token;
-
-              // Check if we have a complete sentence
-              const sentenceEndRegex = /[.!?]+(\s+|$)/;
-              const match = currentSentenceBuffer.search(sentenceEndRegex);
-
-              if (match !== -1) {
-                const endMatch = currentSentenceBuffer.substring(match).match(/^[.!?]+\s*/);
-                const sentenceEndIndex = match + (endMatch ? endMatch[0].length : 1);
-
-                const completeSentence = currentSentenceBuffer.substring(0, sentenceEndIndex).trim();
-                currentSentenceBuffer = currentSentenceBuffer.substring(sentenceEndIndex);
-
-                if (completeSentence) {
-                  // Push to queue for immediate processing
-                  sentenceQueue.push(completeSentence);
-                }
-              }
+              // Collect all tokens into full response
+              fullResponseText += token;
             },
             checkCancellation // Pass the cancellation checker
           );
@@ -322,19 +258,43 @@ fastify.register(async function (fastify) {
               if (conversationState) {
                 conversationState.updateFromAssistantResponse(lastAiMessage.content);
               }
+
+              // Use the complete message content for TTS (more reliable than token buffer)
+              fullResponseText = lastAiMessage.content;
             }
           }
 
-          // Handle any remaining buffer
-          if (currentSentenceBuffer.trim()) {
-            sentenceQueue.push(currentSentenceBuffer.trim());
-            currentSentenceBuffer = '';
+          // Check cancellation before TTS
+          if (processingState.shouldCancel) {
+            console.log('🛑 Generation cancelled before TTS');
+            return;
           }
 
-          isOpenAIComplete = true; // Signal consumer to finish
+          // Generate TTS for ENTIRE response as ONE continuous audio
+          if (fullResponseText.trim()) {
+            console.log('🎤 Step 2: Generating TTS for FULL response (continuous speech):', fullResponseText);
 
-          // Wait for all TTS to finish
-          await sentenceProcessingPromise;
+            // AUTO-DETECT LANGUAGE for proper pronunciation
+            // Check if text contains Hindi/Devanagari characters
+            const hindiPattern = /[\u0900-\u097F]/; // Devanagari Unicode range
+            const detectedLanguage = hindiPattern.test(fullResponseText) ? 'hi' : 'en';
+            console.log(`🌍 Detected language: ${detectedLanguage === 'hi' ? 'Hindi' : 'English'}`);
+
+            try {
+              // Send entire response as one audio for natural, continuous speech
+              // Use detected language for proper pronunciation
+              await streamClonedVoiceTTS(fullResponseText, socket, detectedLanguage, 1.5, 0.75);
+            } catch (error) {
+              console.error('❌ Error streaming TTS:', error);
+              // Fallback: send error to client
+              if (socket && socket.readyState === 1) {
+                socket.send(JSON.stringify({
+                  type: 'tts_error',
+                  error: 'Failed to generate speech: ' + error.message
+                }));
+              }
+            }
+          }
 
           // If user just confirmed, send signal to end call automatically
           if (conversationState.isConfirmed) {

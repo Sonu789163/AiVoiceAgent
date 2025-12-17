@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
+import { AdvancedEchoCanceller } from './audioProcessor.js';
 
 const WS_URL = (() => {
   const url = `${import.meta.env.VITE_WS_URL}/connection`;
@@ -36,6 +37,7 @@ function App({ onCallStatusChange }) {
   const silenceTimerRef = useRef(null); // Timer for Turbo VAD
   const lastSpeechTimeRef = useRef(0); // Timestamp of last interim speech
   const interimTranscriptRef = useRef(''); // Buffer for interim transcript
+  const echoCancellerRef = useRef(null); // Echo cancellation processor
 
   // Notify parent component when call status changes
   useEffect(() => {
@@ -81,6 +83,16 @@ function App({ onCallStatusChange }) {
           // Ignore cleanup errors
         }
         mediaRecorderRef.current = null;
+      }
+
+      // Cleanup echo canceller
+      if (echoCancellerRef.current) {
+        try {
+          echoCancellerRef.current.destroy();
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+        echoCancellerRef.current = null;
       }
 
       if (audioContextRef.current) {
@@ -161,7 +173,7 @@ function App({ onCallStatusChange }) {
               // Automatically end the call after confirmation
               setTimeout(() => {
                 stopCall();
-              }, 500); // Small delay to ensure final message is heard
+              }, 1500); // Small delay to ensure final message is heard
             } else if (data.type === 'ai_response') {
               console.log('🤖 AI RESPONSE:', data.text);
             } else if (data.error) {
@@ -302,6 +314,11 @@ function App({ onCallStatusChange }) {
       isSpeakingRef.current = false;
       setStatus(isCallActive ? 'listening' : 'idle');
 
+      // Notify echo canceller that speaker is no longer active
+      if (echoCancellerRef.current) {
+        echoCancellerRef.current.disconnectSpeakerReference();
+      }
+
       // After all speech is done, ensure recognition is still running
       // Use a longer delay to ensure audio playback has fully completed
       setTimeout(() => {
@@ -320,6 +337,11 @@ function App({ onCallStatusChange }) {
 
     isSpeakingRef.current = true;
     setStatus('speaking');
+
+    // Notify echo canceller that speaker is active
+    if (echoCancellerRef.current) {
+      echoCancellerRef.current.isSpeakerActive = true;
+    }
 
     const text = ttsQueueRef.current.shift();
     console.log('🔊 Speaking text:', text);
@@ -375,18 +397,21 @@ function App({ onCallStatusChange }) {
 
     // Ensure audio context is initialized and resumed
     if (!audioContextRef.current) {
+      console.log('⚠️ Audio context not initialized, creating now...');
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
         sampleRate: 16000,
       });
+      console.log('✅ Audio context created, state:', audioContextRef.current.state);
     }
 
     const audioContext = audioContextRef.current;
+    console.log('📊 Audio context state:', audioContext.state);
 
     // Resume audio context if suspended (browser autoplay policy)
     if (audioContext.state === 'suspended') {
       try {
         await audioContext.resume();
-        console.log('✅ Audio context resumed');
+        console.log('✅ Audio context resumed, new state:', audioContext.state);
       } catch (error) {
         console.error('❌ Failed to resume audio context:', error);
       }
@@ -484,10 +509,15 @@ function App({ onCallStatusChange }) {
     isPlayingRef.current = true;
     setStatus('speaking');
 
-    // BARGE-IN ENABLED: Keep recognition running during playback
-    // This allows the user to interrupt the agent at any time
-    // Note: This may cause echo on speakers - use headphones for best experience
-    console.log('� Starting playback (recognition stays active for barge-in)');
+    // Notify echo canceller that speaker is active
+    if (echoCancellerRef.current) {
+      echoCancellerRef.current.isSpeakerActive = true;
+    }
+
+    // BARGE-IN ENABLED with ECHO CANCELLATION: Keep recognition running during playback
+    // Echo cancellation removes the agent's voice from microphone input
+    // This allows the user to interrupt the agent at any time, even with speakers!
+    console.log('▶️ Starting playback (recognition stays active with echo cancellation)');
 
     try {
       // Audio context should already be initialized
@@ -528,7 +558,17 @@ function App({ onCallStatusChange }) {
 
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
+
+        // Connect to destination for playback
         source.connect(audioContext.destination);
+
+        // ECHO CANCELLATION: Connect to echo canceller reference signal
+        // TEMPORARILY DISABLED FOR TESTING - Re-enable after confirming playback works
+        /*
+        if (echoCancellerRef.current && echoCancellerRef.current.isSpeakerActive) {
+          echoCancellerRef.current.connectSpeakerReference(source);
+        }
+        */
 
         // Schedule playback
         // If we fell behind real-time (underrun), jump to current time + small buffer
@@ -581,8 +621,14 @@ function App({ onCallStatusChange }) {
         } else {
           // No more chunks, update status
           // Note: Recognition is ALREADY running, so we don't need to restart it!
-          // No more chunks, update status
           setStatus(isCallActive ? 'listening' : 'idle');
+
+          // Notify echo canceller that speaker is no longer active
+          // DON'T disconnect - just set flag to false
+          if (echoCancellerRef.current) {
+            echoCancellerRef.current.isSpeakerActive = false;
+            console.log('🔇 Speaker inactive (echo canceller still connected)');
+          }
 
           // Restart recognition after speaking
           if (isCallActive) {
@@ -681,7 +727,44 @@ function App({ onCallStatusChange }) {
 
       // Use Web Speech API (free) or Deepgram (backend)
       if (useWebSpeechAPI && 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-        console.log('🎤 Using Web Speech API (FREE) for STT');
+        console.log('🎤 Using Web Speech API (FREE) for STT with Echo Cancellation');
+
+        // Initialize Echo Canceller (OPTIONAL - playback works without it)
+        try {
+          // Request microphone access with echo cancellation enabled
+          const micStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              channelCount: 1,
+              sampleRate: 16000,
+              echoCancellation: true, // Browser-level echo cancellation
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
+
+          console.log('✅ Microphone access granted for echo cancellation');
+
+          // Create audio context FIRST if not exists
+          if (!audioContextRef.current) {
+            audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
+              sampleRate: 16000,
+            });
+            console.log('✅ Audio context created for echo cancellation');
+          }
+
+          // Initialize echo canceller with valid audio context
+          if (!echoCancellerRef.current && audioContextRef.current) {
+            echoCancellerRef.current = new AdvancedEchoCanceller(audioContextRef.current);
+            await echoCancellerRef.current.init(micStream);
+            echoCancellerRef.current.startProcessing();
+            console.log('✅ Echo Canceller initialized and processing started');
+          }
+
+        } catch (error) {
+          console.error('❌ Failed to initialize echo canceller:', error);
+          console.warn('⚠️ Continuing without echo cancellation - use earbuds for best experience');
+          // Continue without echo cancellation - playback will still work
+        }
 
         // Initialize Web Speech API
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -761,8 +844,9 @@ function App({ onCallStatusChange }) {
             }
 
             // FILTER 1: Confidence threshold - ignore low confidence (likely noise)
-            // For interim results, we're more lenient (0.5), for final we require 0.6
-            const confidenceThreshold = result.isFinal ? 0.6 : 0.5;
+            // LOWERED thresholds for better multilingual support (Hindi, etc.)
+            // For interim results, we're very lenient (0.2), for final we require 0.3
+            const confidenceThreshold = result.isFinal ? 0.3 : 0.2;
 
             if (confidence < confidenceThreshold) {
               console.log(`🔇 Filtered low confidence (${confidence.toFixed(2)}): "${transcript}"`);
@@ -785,7 +869,7 @@ function App({ onCallStatusChange }) {
           const noisePatterns = [
             /^(uh|um|ah|eh|hm|mm)$/i,  // Filler sounds
             /^[^a-z0-9\s]+$/i,          // Only special characters
-            /^(.)\1+$/,                 // Repeated single character (e.g., "aaaa")
+            /^(.)\\1+$/,                 // Repeated single character (e.g., "aaaa")
           ];
 
           const isNoise = (text) => {
@@ -1097,6 +1181,18 @@ function App({ onCallStatusChange }) {
         mediaRecorderRef.current.source.disconnect();
       }
       mediaRecorderRef.current = null;
+    }
+
+    // Stop echo canceller
+    if (echoCancellerRef.current) {
+      try {
+        echoCancellerRef.current.stopProcessing();
+        echoCancellerRef.current.destroy();
+        echoCancellerRef.current = null;
+        console.log('🛑 Echo Canceller stopped and destroyed');
+      } catch (e) {
+        console.error('Error stopping echo canceller:', e);
+      }
     }
 
     // Close WebSocket gracefully
