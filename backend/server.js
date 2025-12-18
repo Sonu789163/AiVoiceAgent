@@ -453,7 +453,7 @@ fastify.register(async function (fastify) {
 });
 
 // Start server
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 8000;
 const HOST = '0.0.0.0';
 
 fastify.listen({ port: PORT, host: HOST }, (err, address) => {
